@@ -1,0 +1,2 @@
+# easyCore
+FiveM Framework
