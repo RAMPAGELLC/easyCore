@@ -1,6 +1,17 @@
 # easyCore
 FiveM Framework
 
+# RAMPAGE.host
+Get VPS hosting for your servers at rampage.host!
+
+* Purchase standard vps [$17.50](https://rampagecloud.com/store/vps-hosting/medium-vps)
+* Purchase team speak server [$5.00](https://rampagecloud.com/store/voice-servers/teamspeak3-server)
+* Purchase mumble server [$5.00](https://rampagecloud.com/store/voice-servers/mumble-server)
+* Purchase discord.js server [$4.00](https://rampagecloud.com/store/discord-hosting/discordjs-hosting)
+* Purchase discord.py server [$4.00](https://rampagecloud.com/store/discord-hosting/discordpy-hosting)
+
+Use code ``EASYCORE`` for 20% off your first month at checkout.
+
 # License
 ```
 easyCore Framework
