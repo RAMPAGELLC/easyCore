@@ -27,41 +27,6 @@ MySQL.ready(function()
     function() end)
 end)
 
-RegisterServerEvent('cui_character:save')
-AddEventHandler('cui_character:save', function(data)
-    local _source = source
-    local license = easyCore.Functions.ExtractIdentifiers(_source).License
-
-    if license then
-        MySQL.ready(function()
-            MySQL.Async.execute('INSERT INTO `player_skins` (`identifier`, `skin`) VALUES (@identifier, @skin) ON DUPLICATE KEY UPDATE `skin` = @skin', {
-                ['@skin'] = json.encode(data),
-                ['@identifier'] = license
-            })
-        end)
-    end
-end)
-
-RegisterServerEvent('cui_character:requestPlayerData')
-AddEventHandler('cui_character:requestPlayerData', function()
-    local _source = source
-    local license = easyCore.Functions.ExtractIdentifiers(_source).License
-
-    if license then
-        MySQL.ready(function()
-            MySQL.Async.fetchAll('SELECT skin FROM player_skins WHERE identifier = @identifier', {
-                ['@identifier'] = license
-            }, function(users)
-                local playerData = { skin = nil, newPlayer = true}
-                if users and users[1] ~= nil and users[1].skin ~= nil then
-                    playerData.skin = json.decode(users[1].skin)
-                    playerData.newPlayer = false
-                end
-                TriggerClientEvent('cui_character:recievePlayerData', _source, playerData)
-            end)
-        end)
-    end
-end)
 
 --[[
 example
