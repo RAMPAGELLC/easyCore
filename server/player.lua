@@ -119,20 +119,66 @@ function easyCore.Player.GetCharacters(PlayerId)
     local License = easyCore.Functions.ExtractIdentifiers(PlayerId).License
     local PlayerData = MySQL.Sync.prepare('SELECT * FROM players where license = ?', {License})
 
-    if not skincreator.Settings.CharacterCreationEnabled then
-        -- if the request was not successful as defined by the first boolean
-        -- will check the second boolean, if true then it was forcefully returned false
-        -- as characters been disabled.
-
-        -- im terrible at explaining.
-        return false, true
-    end
-
     if PlayerData then
         return true, PlayerData.CharacterData.Characters or {}
     else
         return false, false
     end
+end
+
+function easyCore.Player.LoadCharacter(PlayerId, CharacterId)
+    local License = easyCore.Functions.ExtractIdentifiers(PlayerId).License
+    MySQL.Async.fetchAll('SELECT * FROM outfits WHERE license = @license AND characterid = @characterid', {
+        ['@license'] = License,
+        ['@characterid'] = CharacterId
+    }, function(result)
+        if result[1] ~= nil then
+            local data = result[1]
+            local dad = data["dad"]
+            local mum = data["mum"]
+            local dadmumpercent = data["dadmumpercent"]
+            local skin = data["skin"]
+            local eyecolor = data["eyecolor"]
+            local acne = data["acne"]
+            local skinproblem = data["skinproblem"]
+            local freckle = data["freckle"]
+            local wrinkle = data["wrinkle"]
+            local wrinkleopacity = data["wrinkleopacity"]
+            local eyebrow = data["eyebrow"]
+            local eyebrowopacity = data["eyebrowopacity"]
+            local beard = data["beard"]
+            local beardopacity = data["beardopacity"]
+            local beardcolor = data["beardcolor"]
+            local hair = data["hair"]
+            local haircolor = data["haircolor"]
+            local torso = data["torso"]
+            local torsotext = data["torsotext"]
+            local leg = data["leg"]
+            local legtext = data["legtext"]
+            local shoes = data["shoes"]
+            local shoestext = data["shoestext"]
+            local accessory = data["accessory"]
+            local accessorytext = data["accessorytext"]
+            local undershirt = data["undershirt"]
+            local undershirttext = data["undershirttext"]
+            local torso2 = data["torso2"]
+            local torso2text = data["torso2text"]
+            local prop_hat = data["prop_hat"]
+            local prop_hat_text = data["prop_hat_text"]
+            local prop_glasses = data["prop_glasses"]
+            local prop_glasses_text = data["prop_glasses_text"]
+            local prop_earrings = data["prop_earrings"]
+            local prop_earrings_text = data["prop_earrings_text"]
+            local prop_watches = data["prop_watches"]
+            local prop_watches_text = data["prop_watches_text"]
+
+            skincreator.LoadSkin(PlayerId, dad, mum, dadmumpercent, skin, eyecolor, acne, skinproblem, freckle, wrinkle,
+                wrinkleopacity, eyebrow, eyebrowopacity, beard, beardopacity, beardcolor, hair, haircolor, torso,
+                torsotext, leg, legtext, shoes, shoestext, accessory, accessorytext, undershirt, undershirttext, torso2,
+                torso2text, prop_hat, prop_hat_text, prop_glasses, prop_glasses_text, prop_earrings, prop_earrings_text,
+                prop_watches, prop_watches_text)
+        end
+    end)
 end
 
 function easyCore.Player.CreateCharacter(PlayerId, CharacterData, SetAsCurrentCharacter)
@@ -175,7 +221,7 @@ function easyCore.Player.CreateCharacter(PlayerId, CharacterData, SetAsCurrentCh
 
             LoggedIn = true,
             LastLogin = os.time(),
-            LastLoginFormated = os.date('%Y-%m-%d %H:%M:%S', self.Data.CharacterData.Characters[1].LastLogin),
+            LastLoginFormated = os.date('%Y-%m-%d %H:%M:%S', self.Data.CharacterData.Characters[1].LastLogin)
         }
 
         Template.FirstName = CharacterData.FirstName or "John"
@@ -188,7 +234,6 @@ function easyCore.Player.CreateCharacter(PlayerId, CharacterData, SetAsCurrentCh
         if SetAsCurrentCharacter ~= nil and SetAsCurrentCharacter then
             PlayerData.CharacterData.ActiveCharacter = Id
             skincreator.ToggleCreator(PlayerId, Id, true)
-            easyCore.Player.LoadCharacter(PlayerId)
         end
     else
         return false
