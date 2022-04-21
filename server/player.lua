@@ -57,8 +57,8 @@ function easyCore.Player.Save(PlayerId, ShowNotification)
         MySQL.Async.execute(
             'INSERT INTO players (citizenid, license, data, identifiers) VALUES (:citizenid, :license, :data, :identifiers) ON DUPLICATE KEY UPDATE citizenid = :citizenid, license = :license, data = :data, identifiers = :identifiers',
             {
-                citizenid = PlayerData.citizenid,
-                license = PlayerData.license,
+                citizenid = PlayerData.IdentifierData.CitizenId,
+                license = PlayerData.IdentifierData.License,
                 data = json.encode(PlayerData.CharacterData),
                 identifiers = json.encode(PlayerData.IdentifierData)
             }, function(ar)
@@ -88,11 +88,121 @@ function easyCore.Player.Save(PlayerId, ShowNotification)
     end
 end
 
-function easyCore.Player.GetCharacters(PlayerId)
-    local Identifiers = easyCore.Functions.ExtractIdentifiers(PlayerId)
+function easyCore.Player.CreatePhoneNumber()
+    local UniqueFound = false
+    local PhoneNumber = nil
+
+    while not UniqueFound do
+        PhoneNumber = math.random(100,999) .. math.random(1000000,9999999)
+        local query = '%' .. PhoneNumber .. '%'
+        local result = MySQL.Sync.prepare('SELECT COUNT(*) as count FROM players WHERE data LIKE ?', { query })
+
+        if result == 0 then
+            UniqueFound = true
+        end
+    end
+
+    return PhoneNumber
+    -- from QBCore main/server/player.lua QBCore.Functions.CreatePhoneNumber()
 end
 
-function easyCore.Player.Login(PlayerId, CharacterId)
+function easyCore.Player.GetCharacters(PlayerId)
+    local License = easyCore.Functions.ExtractIdentifiers(PlayerId).License
+    local PlayerData = MySQL.Sync.prepare('SELECT * FROM players where license = ?', {License})
+
+    if PlayerData then
+        return true, PlayerData.CharacterData.Characters or {}
+    else
+        return false, {}
+    end
+end
+
+function easyCore.Player.CreateCharacter(PlayerId, CharacterData, SetAsCurrentCharacter)
+    local License = easyCore.Functions.ExtractIdentifiers(PlayerId).License
+    local PlayerData = MySQL.Sync.prepare('SELECT * FROM players where license = ?', {License})
+
+    if PlayerData then
+        local Id = #PlayerData.CharacterData.Characters+1;
+        local Template = {
+            -- Basic
+            FirstName = "John",
+            LastName = "Doe",
+            BirthDate = "12/24/1969",
+            Phone = "123-456-7890",
+
+            Licenses = {
+                driver = false,
+                business = false,
+                firearm = false
+            },
+
+            -- Money
+            Cash = easyCore.Settings.DefaultCash or 5000,
+            Bank = easyCore.Settings.DefaultBank or 1000,
+
+            -- Health
+            Hunger = 100,
+            Thirst = 100,
+            Stamina = 100,
+
+            -- Job
+            JobId = 1,
+            JobGrade = 1,
+            OnDuty = false,
+
+            -- Criminaltiy
+            GangAssociation = false,
+            GangId = 1,
+            GangGrade = 1,
+
+            LoggedIn = true,
+            LastLogin = os.time(),
+            LastLoginFormated = os.date('%Y-%m-%d %H:%M:%S', self.Data.CharacterData.Characters[1].LastLogin),
+
+            -- Outfit
+            CharacterConfiguration = {}
+        }
+
+        Template.FirstName = CharacterData.FirstName or "John"
+        Template.LastName = CharacterData.LastName or "Doe"
+        Template.BirthDate = CharacterData.BirthDate or "12/24/1969"
+        Template.Phone = CharacterData.Phone or easyCore.Player.CreatePhoneNumber()
+
+        local success, characterdata = exports["kimi_callbacks"]:Trigger("easyCore:client:InitCharacterCustomization", PlayerId)
+        
+        repeat Citizen.Wait(1 * 1000) until (success == true)
+        easyCore.Dev.Log("Character Apperance Dump")
+        easyCore.Dev.Dump(CharacterData)
+        TriggerClientEvent("easyCore:client:SetPlayerAppearance", CharacterData)
+        Template.CharacterConfiguration = CharacterData
+        PlayerData.CharacterData.Characters[Id] = Template
+
+        if SetAsCurrentCharacter ~= nil and SetAsCurrentCharacter then
+            PlayerData.CharacterData.ActiveCharacter = Id
+            easyCore.Player.LoadCharacter(PlayerId)
+        end
+    else
+        return false
+    end
+end
+
+function easyCore.Player.Login(PlayerId, CitizenId, CharacterId)
+    local PlayerData = MySQL.Sync.prepare('SELECT * FROM players where citizenid = ?', {CitizenId})
+    local license = easyCore.Functions.ExtractIdentifiers(PlayerId).License
+
+    if PlayerData then
+        if license == PlayerData.license then
+            -- Use saved data
+            PlayerData.CharacterData.ActiveCharacter = CharacterId
+            easyCore.Player.Verify(PlayerId, PlayerData)
+        else
+            DropPlayer(PlayerId, "Exploiting")
+        end
+    else
+        -- Create
+        PlayerData.CharacterData.ActiveCharacter = 0
+        easyCore.Player.Verify(PlayerId, PlayerData)
+    end
 end
 
 function easyCore.Player.Logout(PlayerId)
@@ -100,26 +210,15 @@ function easyCore.Player.Logout(PlayerId)
     if success then
         data.Data.CharacterData.Characters[data.Data.CharacterData.ActivateCharacter].LoggedIn = false
         data.Functions.Save(false)
-        print("[easyCore] Saved player data for PlayerId ".. PlayerId)
+        print("[easyCore] Saved player data for PlayerId " .. PlayerId)
     else
-        warn("[easyCore] Error occured attempting to logout a non-existent player. PlayerId: ".. PlayerId)
+        warn("[easyCore] Error occured attempting to logout a non-existent player. PlayerId: " .. PlayerId)
     end
 end
 
 function easyCore.Player.Verify(PlayerId, PlayerData)
+    local Identifiers = easyCore.Functions.ExtractIdentifiers(PlayerId)
     local self = {}
-    self.Data = {       
-        ["PlayerId"] = PlayerId,
-        ["Ped"] = GetPlayerPed(PlayerId),
-        ["Coords"] = GetEntityCoords(self.Data.Ped),
-    }
-
-end
-
-function easyCore.Player.Create(PlayerId, PlayerData)
-    local self = {}
-    self.Functions = {}
-    self.Data = PlayerData 
     self.Data = {
         ["PlayerId"] = PlayerId,
         ["Ped"] = GetPlayerPed(PlayerId),
@@ -128,43 +227,7 @@ function easyCore.Player.Create(PlayerId, PlayerData)
         ["CharacterData"] = {
             ["ActiveCharacter"] = 1,
             ["MaxCharacters"] = 5,
-            ["Characters"] = {
-                [1] = {
-                    -- Basic
-                    FirstName = "John",
-                    LastName = "Doe",
-                    BirthDate = "12/24/1969",
-                    Phone = "123-456-7890",
-                    PlayerUID = 1, -- Unique Player ID saved & re-used every login for same user, not same as FiveM player id.
-
-                    Licenses = {
-                        driver = true,
-                        business = true,
-                        firearm = true
-                    },
-
-                    -- Money
-                    Cash = easyCore.Settings.DefaultCash or 5000,
-                    Bank = easyCore.Settings.DefaultBank or 1000,
-
-                    -- Health
-                    Hunger = 100,
-                    Thirst = 100,
-                    Stamina = 100,
-
-                    -- Job
-                    JobId = 1,
-                    OnDuty = false,
-
-                    -- Criminaltiy
-                    GangAssociation = false,
-                    GangId = 1,
-
-                    LoggedIn = true,
-                    LastLogin = os.time(),
-                    LastLoginFormated = os.date('%Y-%m-%d %H:%M:%S', self.Data.CharacterData.Characters[1].LastLogin)
-                }
-            }
+            ["Characters"] = {}
         },
 
         ["IdentifierData"] = {
@@ -177,6 +240,26 @@ function easyCore.Player.Create(PlayerId, PlayerData)
             ["LiveId"] = ""
         }
     }
+
+    -- Verify CharacterData
+    self.Data.CharacterData.ActiveCharacter = PlayerData.CharacterData.ActiveCharacter or 0
+    self.Data.CharacterData.MaxCharacters = PlayerData.CharacterData.MaxCharacters or easyCore.Settings.MaxCharacters
+    self.Data.CharacterData.Characters = PlayerData.CharacterData.Characters or {}
+
+    -- Verify IdentifierData
+    self.Data.IdentifierData.License = PlayerData.IdentifierData.License or Identifiers.License
+    self.Data.IdentifierData.Discord = PlayerData.IdentifierData.Discord or Identifiers.Discord
+    self.Data.IdentifierData.IP = PlayerData.IdentifierData.IP or Identifiers.IP
+    self.Data.IdentifierData.Steam = PlayerData.IdentifierData.Steam or Identifiers.Steam
+    self.Data.IdentifierData.CitizenId = PlayerData.IdentifierData.CitizenId or easyCore.Shared.CreateCitizenId()
+
+    easyCore.Player.Create(PlayerId, self.Data)
+end
+
+function easyCore.Player.Create(PlayerId, PlayerData)
+    local self = {}
+    self.Functions = {}
+    self.Data = PlayerData
 
     self.Functions.Save = function(ShowNotification)
         return easyCore.Player.Save(self.Data.PlayerId, ShowNotification or false) -- Boolean value. true = success, false = error.
@@ -222,7 +305,6 @@ function easyCore.Player.Create(PlayerId, PlayerData)
     self.Functions.UpdatePed(false)
     self.Functions.UpdateCoords(false)
     self.Functions.UpdateIdentifiers(false)
-    self.Data.IdentifierData.CitizenId = easyCore.Shared.CreateCitizenId()
 
     easyCore.Player.Users[self.Data.PlayerId] = self
     easyCore.Player.Save(self.Data.PlayerId)

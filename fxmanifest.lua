@@ -17,11 +17,20 @@ files {
 
 client_scripts {
     'client/*.lua',
-    'shared/*.lua'
+    'shared/*.lua',
+    'plugins/client_*.lua',
+    'plugins/client.lua',
+    'plugins/shared.lua',
+    'plugins/shared_*.lua',
 }
 
 server_scripts {
     'Settings.lua',
+    'modules/*.lua',
     'server/*.lua',
-    'shared/*.lua'
+    'shared/*.lua',
+    'plugins/server_*.lua',
+    'plugins/server.lua',
+    'plugins/shared.lua',
+    'plugins/shared_*.lua',
 }
