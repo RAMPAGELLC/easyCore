@@ -22,75 +22,46 @@ pluginExports.LoadSkin = function(player, dad, mum, dadmumpercent, skin, eyecolo
     prop_watches_text)
 end
 
-RegisterServerEvent("easyCore:server:updateSkin")
-AddEventHandler("easyCore:server:updateSkin",
-    function(characterid, dad, mum, dadmumpercent, skin, eyecolor, acne, skinproblem, freckle, wrinkle, wrinkleopacity,
-        eyebrow, eyebrowopacity, beard, beardopacity, beardcolor, hair, haircolor, torso, torsotext, leg, legtext,
-        shoes, shoestext, accessory, accessorytext, undershirt, undershirttext, torso2, torso2text, prop_hat,
-        prop_hat_text, prop_glasses, prop_glasses_text, prop_earrings, prop_earrings_text, prop_watches,
-        prop_watches_text)
-        local PlayerId = source
-        local success, data = easyCore.Player.GetPlayerById(PlayerId)
+MySQL.ready(function()
+    MySQL.Async.execute('CREATE TABLE IF NOT EXISTS `player_skins` (`id` int(11) NOT NULL auto_increment, `identifier` varchar(128) NOT NULL, `skin` LONGTEXT NULL DEFAULT NULL, PRIMARY KEY  (`id`), UNIQUE(`identifier`))',{}, 
+    function() end)
+end)
 
-        if not success then
-            return easyCore.Dev.Error("Failed to save character, can't find player!")
-        end
+RegisterServerEvent('cui_character:save')
+AddEventHandler('cui_character:save', function(data)
+    local _source = source
+    local license = easyCore.Functions.ExtractIdentifiers(_source).License
 
-        local license = data.Data.IdentifierData.License
-
-        if license == "" then
-            data.Functions.UpdateIdentifiers(true)
-            success, data = easyCore.Player.GetPlayerById(PlayerId)
-            license = data.Data.IdentifierData.License
-            easyCore.Dev.Log(
-                "Invalid identifier for skincreator. Auto called Player.Functions.UpdateIdentifier with boolean true.")
-        end
-
-        MySQL.Async.execute(
-            "INSERT INTO outfits (license, characterid, dad, mum, dadmumpercent, skin, eyecolor, acne, skinproblem, freckle, wrinkle, wrinkleopacity, eyebrow, eyebrowopacity, beard, beardopacity, beardcolor, hair, hairtext, torso, torsotext, leg, legtext, shoes, shoestext, accessory, accessorytext, undershirt, undershirttext, torso2, torso2text, prop_hat, prop_hat_text, prop_glasses, prop_glasses_text, prop_earrings, prop_earrings_text, prop_watches, prop_watches_text) VALUES(:license, :characterid, :dad, :mum, :dadmumpercent, :skin, :eyecolor, :acne, :skinproblem, :freckle, :wrinkle, :wrinkleopacity, :eyebrow, :eyebrowopacity, :beard, :beardopacity, :beardcolor, :hair, :hairtext, :torso, :torsotext, :leg, :legtext, :shoes, :shoestext, :accessory, :accessorytext, :undershirt, :undershirttext, :torso2, :torso2text, :prop_hat, :prop_hat_text, :prop_glasses, :prop_glasses_text, :prop_earrings, :prop_earrings_text, :prop_watches, :prop_watches_text) ON DUPLICATE KEY UPDATE dad=@dad, mum=@mum, dadmumpercent=@dadmumpercent, skinton=@skin, eyecolor=@eyecolor, acne=@acne, skinproblem=@skinproblem, freckle=@freckle, wrinkle=@wrinkle, wrinkleopacity=@wrinkleopacity, eyebrow=@eyebrow, eyebrowopacity=@eyebrowopacity, beard=@beard, beardopacity=@beardopacity, beardcolor=@beardcolor, hair=@hair, hairtext=@hairtext, torso=@torso, torsotext=@torsotext, leg=@leg, legtext=@legtext, shoes=@shoes, shoestext=@shoestext, accessory=@accessory, accessorytext=@accessorytext, undershirt=@undershirt, undershirttext=@undershirttext, torso2=@torso2, torso2text=@torso2text, prop_hat=@prop_hat, prop_hat_text=@prop_hat_text, prop_glasses=@prop_glasses, prop_glasses_text=@prop_glasses_text, prop_earrings=@prop_earrings, prop_earrings_text=@prop_earrings_text, prop_watches=@prop_watches, prop_watches_text=@prop_watches_text WHERE license=@license AND characterid=@characterid",
-            {
-                ['@license'] = license,
-                ['@characterid'] = characterid,
-                ['@dad'] = dad,
-                ['@mum'] = mum,
-                ['@dadmumpercent'] = dadmumpercent,
-                ['@skin'] = skin,
-                ['@eyecolor'] = eyecolor,
-                ['@acne'] = acne,
-                ['@skinproblem'] = skinproblem,
-                ['@freckle'] = freckle,
-                ['@wrinkle'] = wrinkle,
-                ['@wrinkleopacity'] = wrinkleopacity,
-                ['@eyebrow'] = eyebrow,
-                ['@eyebrowopacity'] = eyebrowopacity,
-                ['@beard'] = beard,
-                ['@beardopacity'] = beardopacity,
-                ['@beardcolor'] = beardcolor,
-                ['@hair'] = hair,
-                ['@hairtext'] = haircolor,
-                ['@torso'] = torso,
-                ['@torsotext'] = torsotext,
-                ['@leg'] = leg,
-                ['@legtext'] = legtext,
-                ['@shoes'] = shoes,
-                ['@shoestext'] = shoestext,
-                ['@accessory'] = accessory,
-                ['@accessorytext'] = accessorytext,
-                ['@undershirt'] = undershirt,
-                ['@undershirttext'] = undershirttext,
-                ['@torso2'] = torso2,
-                ['@torso2text'] = torso2text,
-                ['@prop_hat'] = prop_hat,
-                ['@prop_hat_text'] = prop_hat_text,
-                ['@prop_glasses'] = prop_glasses,
-                ['@prop_glasses_text'] = prop_glasses_text,
-                ['@prop_earrings'] = prop_earrings,
-                ['@prop_earrings_text'] = prop_earrings_text,
-                ['@prop_watches'] = prop_watches,
-                ['@prop_watches_text'] = prop_watches_text
+    if license then
+        MySQL.ready(function()
+            MySQL.Async.execute('INSERT INTO `player_skins` (`identifier`, `skin`) VALUES (@identifier, @skin) ON DUPLICATE KEY UPDATE `skin` = @skin', {
+                ['@skin'] = json.encode(data),
+                ['@identifier'] = license
             })
-        easyCore.Player.LoadCharacter(PlayerId)
-    end)
+        end)
+    end
+end)
+
+RegisterServerEvent('cui_character:requestPlayerData')
+AddEventHandler('cui_character:requestPlayerData', function()
+    local _source = source
+    local license = easyCore.Functions.ExtractIdentifiers(_source).License
+
+    if license then
+        MySQL.ready(function()
+            MySQL.Async.fetchAll('SELECT skin FROM player_skins WHERE identifier = @identifier', {
+                ['@identifier'] = license
+            }, function(users)
+                local playerData = { skin = nil, newPlayer = true}
+                if users and users[1] ~= nil and users[1].skin ~= nil then
+                    playerData.skin = json.decode(users[1].skin)
+                    playerData.newPlayer = false
+                end
+                TriggerClientEvent('cui_character:recievePlayerData', _source, playerData)
+            end)
+        end)
+    end
+end)
 
 --[[
 example

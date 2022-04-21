@@ -1,1216 +1,1585 @@
-local isSkinCreatorOpened = false
-local cam = -1
-local heading = 332.219879
-local zoom = "visage"
-local cid = 0
+previewPed = nil
+isInterfaceOpening = false
+isModelLoaded = false
 
-function updateSkin(data)
-    v = data.value
-    -- Face
-    dad = tonumber(data.dad)
-    mum = tonumber(data.mum)
-    dadmumpercent = tonumber(data.dadmumpercent)
-    skin = tonumber(data.skin)
-    eyecolor = tonumber(data.eyecolor)
-    acne = tonumber(data.acne)
-    skinproblem = tonumber(data.skinproblem)
-    freckle = tonumber(data.freckle)
-    wrinkle = tonumber(data.wrinkle)
-    wrinkleopacity = tonumber(data.wrinkleopacity)
-    hair = tonumber(data.hair)
-    haircolor = tonumber(data.haircolor)
-    eyebrow = tonumber(data.eyebrow)
-    eyebrowopacity = tonumber(data.eyebrowopacity)
-    beard = tonumber(data.beard)
-    beardopacity = tonumber(data.beardopacity)
-    beardcolor = tonumber(data.beardcolor)
-    -- Clothes
-    hats = tonumber(data.hats)
-    glasses = tonumber(data.glasses)
-    ears = tonumber(data.ears)
-    tops = tonumber(data.tops)
-    pants = tonumber(data.pants)
-    shoes = tonumber(data.shoes)
-    watches = tonumber(data.watches)
+isPlayerReady = false
 
-    if (v == true) then
-        local ped = GetPlayerPed(-1)
-        local torso = GetPedDrawableVariation(ped, 3)
-        local torsotext = GetPedTextureVariation(ped, 3)
-        local leg = GetPedDrawableVariation(ped, 4)
-        local legtext = GetPedTextureVariation(ped, 4)
-        local shoes = GetPedDrawableVariation(ped, 6)
-        local shoestext = GetPedTextureVariation(ped, 6)
-        local accessory = GetPedDrawableVariation(ped, 7)
-        local accessorytext = GetPedTextureVariation(ped, 7)
-        local undershirt = GetPedDrawableVariation(ped, 8)
-        local undershirttext = GetPedTextureVariation(ped, 8)
-        local torso2 = GetPedDrawableVariation(ped, 11)
-        local torso2text = GetPedTextureVariation(ped, 11)
-        local prop_hat = GetPedPropIndex(ped, 0)
-        local prop_hat_text = GetPedPropTextureIndex(ped, 0)
-        local prop_glasses = GetPedPropIndex(ped, 1)
-        local prop_glasses_text = GetPedPropTextureIndex(ped, 1)
-        local prop_earrings = GetPedPropIndex(ped, 2)
-        local prop_earrings_text = GetPedPropTextureIndex(ped, 2)
-        local prop_watches = GetPedPropIndex(ped, 6)
-        local prop_watches_text = GetPedPropTextureIndex(ped, 6)
+-- TODO: Properly format SkinCreator.Client.Lua and link it up with SkinCreator.Server.Lua and Server.Player.lua
+-- RAMPAGE-jake.
 
-        TriggerServerEvent("easyCore:server:updateSkin", cid, dad, mum, dadmumpercent, skin, eyecolor, acne,
-            skinproblem, freckle, wrinkle, wrinkleopacity, eyebrow, eyebrowopacity, beard, beardopacity, beardcolor,
-            hair, haircolor, torso, torsotext, leg, legtext, shoes, shoestext, accessory, accessorytext, undershirt,
-            undershirttext, torso2, torso2text, prop_hat, prop_hat_text, prop_glasses, prop_glasses_text, prop_earrings,
-            prop_earrings_text, prop_watches, prop_watches_text)
+function PreparePlayer()
+    if SkinCreatorConfig.EnterCityAnimation then
+        if not IsScreenFadedOut() then
+            DoScreenFadeOut(0)
+        end
+
+        while not isModelLoaded do
+            Citizen.Wait(0)
+        end
+
+        SwitchOutPlayer(PlayerPedId(), 0, 1)
+
+        while GetPlayerSwitchState() ~= 5 do
+            Citizen.Wait(0)
+        end
+
+        DoScreenFadeIn(500)
+        while not IsScreenFadedIn() do
+            Citizen.Wait(0)
+        end
+
+        SwitchInPlayer(PlayerPedId())
+
+        while GetPlayerSwitchState() ~= 12 do
+            Citizen.Wait(0)
+        end
     else
-        SetPedDefaultComponentVariation(GetPlayerPed(-1))
+        if not IsScreenFadedOut() then
+            DoScreenFadeOut(0)
+        end
+        Citizen.Wait(7500)
+        DoScreenFadeIn(500)
+    end
 
-        -- Face
-        SetPedHeadBlendData(GetPlayerPed(-1), dad, mum, dad, skin, skin, skin, dadmumpercent * 0.1, dadmumpercent * 0.1,
-            1.0, true)
-        SetPedEyeColor(GetPlayerPed(-1), eyecolor)
-        if acne == 0 then
-            SetPedHeadOverlay(GetPlayerPed(-1), 0, acne, 0.0)
+    isPlayerReady = true
+end
+
+Citizen.CreateThread(function()
+    while GetIsLoadingScreenActive() do
+        Citizen.Wait(100)
+    end
+    PreparePlayer()
+end)
+
+local initialized = false
+
+local openTabs = {}
+local currentTab = nil
+
+local isVisible = false
+local isCancelable = true
+
+local playerLoaded = false
+local firstSpawn = true
+local identityLoaded = false
+local preparingSkin = true
+local isPlayerNew = false
+
+local firstCharacter = false
+local newCharacter = false
+
+local currentChar = {}
+local oldChar = {}
+local oldLoadout = {}
+
+local currentIdentity = nil
+
+function BeginCharacterPreview()
+    -- Snapshot all changes data (to be reverted if cancelled)
+    for k, v in pairs(currentChar) do
+        oldChar[k] = v
+    end
+
+    local playerHeading = GetEntityHeading(PlayerPedId())
+    previewPed = ClonePed(PlayerPedId(), false, false, true)
+
+    SetEntityInvincible(previewPed, true)
+    FreezePedCameraRotation(previewPed, true)
+    FreezeEntityPosition(previewPed, true)
+    PlayIdleAnimation(previewPed)
+end
+
+function EndCharacterPreview(save)
+    -- This applies (or ignores) changes to current player ped based on value of 'save'
+    if previewPed then
+        if save then
+            local newModelHash = GetHashKey('mp_m_freemode_01')
+            if currentChar.sex == 1 then
+                newModelHash = GetHashKey('mp_f_freemode_01')
+            end
+
+            -- Replace non-preview player model if gender change was accepted
+            if GetEntityModel(PlayerPedId()) ~= newModelHash then
+                LoadModel(newModelHash)
+            end
+
+            ClonePedToTarget(previewPed, PlayerPedId())
         else
-            SetPedHeadOverlay(GetPlayerPed(-1), 0, acne, 1.0)
-        end
-        SetPedHeadOverlay(GetPlayerPed(-1), 6, skinproblem, 1.0)
-        if freckle == 0 then
-            SetPedHeadOverlay(GetPlayerPed(-1), 9, freckle, 0.0)
-        else
-            SetPedHeadOverlay(GetPlayerPed(-1), 9, freckle, 1.0)
-        end
-        SetPedHeadOverlay(GetPlayerPed(-1), 3, wrinkle, wrinkleopacity * 0.1)
-        SetPedComponentVariation(GetPlayerPed(-1), 2, hair, 0, 2)
-        SetPedHairColor(GetPlayerPed(-1), haircolor, haircolor)
-        SetPedHeadOverlay(GetPlayerPed(-1), 2, eyebrow, eyebrowopacity * 0.1)
-        SetPedHeadOverlay(GetPlayerPed(-1), 1, beard, beardopacity * 0.1)
-        SetPedHeadOverlayColor(GetPlayerPed(-1), 1, 1, beardcolor, beardcolor)
-        SetPedHeadOverlayColor(GetPlayerPed(-1), 2, 1, beardcolor, beardcolor)
-
-        -- Clothes variations
-        if hats == 0 then
-            ClearPedProp(GetPlayerPed(-1), 0)
-        elseif hats == 1 then
-            SetPedPropIndex(GetPlayerPed(-1), 0, 3 - 1, 1 - 1, 2)
-        elseif hats == 2 then
-            SetPedPropIndex(GetPlayerPed(-1), 0, 3 - 1, 7 - 1, 2)
-        elseif hats == 3 then
-            SetPedPropIndex(GetPlayerPed(-1), 0, 4 - 1, 3 - 1, 2)
-        elseif hats == 4 then
-            SetPedPropIndex(GetPlayerPed(-1), 0, 5 - 1, 1 - 1, 2)
-        elseif hats == 5 then
-            SetPedPropIndex(GetPlayerPed(-1), 0, 5 - 1, 2 - 1, 2)
-        elseif hats == 6 then
-            SetPedPropIndex(GetPlayerPed(-1), 0, 6 - 1, 1 - 1, 2)
-        elseif hats == 7 then
-            SetPedPropIndex(GetPlayerPed(-1), 0, 8 - 1, 1 - 1, 2)
-        elseif hats == 8 then
-            SetPedPropIndex(GetPlayerPed(-1), 0, 8 - 1, 2 - 1, 2)
-        elseif hats == 9 then
-            SetPedPropIndex(GetPlayerPed(-1), 0, 8 - 1, 3 - 1, 2)
-        elseif hats == 10 then
-            SetPedPropIndex(GetPlayerPed(-1), 0, 8 - 1, 6 - 1, 2)
-        elseif hats == 11 then
-            SetPedPropIndex(GetPlayerPed(-1), 0, 11 - 1, 6 - 1, 2)
-        elseif hats == 12 then
-            SetPedPropIndex(GetPlayerPed(-1), 0, 10 - 1, 6 - 1, 2)
-        elseif hats == 13 then
-            SetPedPropIndex(GetPlayerPed(-1), 0, 11 - 1, 8 - 1, 2)
-        elseif hats == 14 then
-            SetPedPropIndex(GetPlayerPed(-1), 0, 10 - 1, 8 - 1, 2)
-        elseif hats == 15 then
-            SetPedPropIndex(GetPlayerPed(-1), 0, 13 - 1, 1 - 1, 2)
-        elseif hats == 16 then
-            SetPedPropIndex(GetPlayerPed(-1), 0, 13 - 1, 2 - 1, 2)
-        elseif hats == 17 then
-            SetPedPropIndex(GetPlayerPed(-1), 0, 14 - 1, 3 - 1, 2)
-        elseif hats == 18 then
-            SetPedPropIndex(GetPlayerPed(-1), 0, 15 - 1, 1 - 1, 2)
-        elseif hats == 19 then
-            SetPedPropIndex(GetPlayerPed(-1), 0, 15 - 1, 2 - 1, 2)
-        elseif hats == 20 then
-            SetPedPropIndex(GetPlayerPed(-1), 0, 16 - 1, 2 - 1, 2)
-        elseif hats == 21 then
-            SetPedPropIndex(GetPlayerPed(-1), 0, 16 - 1, 3 - 1, 2)
-        elseif hats == 22 then
-            SetPedPropIndex(GetPlayerPed(-1), 0, 21 - 1, 6 - 1, 2)
-        elseif hats == 23 then
-            SetPedPropIndex(GetPlayerPed(-1), 0, 22 - 1, 1 - 1, 2)
-        elseif hats == 24 then
-            SetPedPropIndex(GetPlayerPed(-1), 0, 26 - 1, 2 - 1, 2)
-        elseif hats == 25 then
-            SetPedPropIndex(GetPlayerPed(-1), 0, 27 - 1, 1 - 1, 2)
-        elseif hats == 26 then
-            SetPedPropIndex(GetPlayerPed(-1), 0, 28 - 1, 1 - 1, 2)
-        elseif hats == 27 then
-            SetPedPropIndex(GetPlayerPed(-1), 0, 35 - 1, 0, 2)
-        elseif hats == 28 then
-            SetPedPropIndex(GetPlayerPed(-1), 0, 56 - 1, 1 - 1, 2)
-        elseif hats == 29 then
-            SetPedPropIndex(GetPlayerPed(-1), 0, 56 - 1, 2 - 1, 2)
-        elseif hats == 30 then
-            SetPedPropIndex(GetPlayerPed(-1), 0, 56 - 1, 3 - 1, 2)
-        elseif hats == 31 then
-            SetPedPropIndex(GetPlayerPed(-1), 0, 77 - 1, 20 - 1, 2)
-        elseif hats == 32 then
-            SetPedPropIndex(GetPlayerPed(-1), 0, 97 - 1, 3 - 1, 2)
+            -- Revert all changes to data variables
+            for k, v in pairs(oldChar) do
+                currentChar[k] = v
+            end
         end
 
-        if glasses == 0 then
-            ClearPedProp(GetPlayerPed(-1), 1)
-        elseif glasses == 1 then
-            SetPedPropIndex(GetPlayerPed(-1), 1, 4 - 1, 1 - 1, 2)
-        elseif glasses == 2 then
-            SetPedPropIndex(GetPlayerPed(-1), 1, 4 - 1, 10 - 1, 2)
-        elseif glasses == 3 then
-            SetPedPropIndex(GetPlayerPed(-1), 1, 5 - 1, 5 - 1, 2)
-        elseif glasses == 4 then
-            SetPedPropIndex(GetPlayerPed(-1), 1, 5 - 1, 10 - 1, 2)
-        elseif glasses == 5 then
-            SetPedPropIndex(GetPlayerPed(-1), 1, 6 - 1, 1 - 1, 2)
-        elseif glasses == 6 then
-            SetPedPropIndex(GetPlayerPed(-1), 1, 6 - 1, 9 - 1, 2)
-        elseif glasses == 7 then
-            SetPedPropIndex(GetPlayerPed(-1), 1, 8 - 1, 1 - 1, 2)
-        elseif glasses == 8 then
-            SetPedPropIndex(GetPlayerPed(-1), 1, 9 - 1, 2 - 1, 2)
-        elseif glasses == 9 then
-            SetPedPropIndex(GetPlayerPed(-1), 1, 10 - 1, 1 - 1, 2)
-        elseif glasses == 10 then
-            SetPedPropIndex(GetPlayerPed(-1), 1, 16 - 1, 7 - 1, 2)
-        elseif glasses == 11 then
-            SetPedPropIndex(GetPlayerPed(-1), 1, 18 - 1, 10 - 1, 2)
-        elseif glasses == 12 then
-            SetPedPropIndex(GetPlayerPed(-1), 1, 26 - 1, 1 - 1, 2)
-        end
-
-        if ears == 0 then
-            ClearPedProp(GetPlayerPed(-1), 2)
-        elseif ears == 1 then
-            SetPedPropIndex(GetPlayerPed(-1), 2, 4 - 1, 1 - 1, 2)
-        elseif ears == 2 then
-            SetPedPropIndex(GetPlayerPed(-1), 2, 5 - 1, 1 - 1, 2)
-        elseif ears == 3 then
-            SetPedPropIndex(GetPlayerPed(-1), 2, 6 - 1, 1 - 1, 2)
-        elseif ears == 4 then
-            SetPedPropIndex(GetPlayerPed(-1), 2, 10 - 1, 2 - 1, 2)
-        elseif ears == 5 then
-            SetPedPropIndex(GetPlayerPed(-1), 2, 11 - 1, 2 - 1, 2)
-        elseif ears == 6 then
-            SetPedPropIndex(GetPlayerPed(-1), 2, 12 - 1, 2 - 1, 2)
-        elseif ears == 7 then
-            SetPedPropIndex(GetPlayerPed(-1), 2, 19 - 1, 4 - 1, 2)
-        elseif ears == 8 then
-            SetPedPropIndex(GetPlayerPed(-1), 2, 20 - 1, 4 - 1, 2)
-        elseif ears == 9 then
-            SetPedPropIndex(GetPlayerPed(-1), 2, 21 - 1, 4 - 1, 2)
-        elseif ears == 10 then
-            SetPedPropIndex(GetPlayerPed(-1), 2, 28 - 1, 1 - 1, 2)
-        elseif ears == 11 then
-            SetPedPropIndex(GetPlayerPed(-1), 2, 29 - 1, 1 - 1, 2)
-        elseif ears == 12 then
-            SetPedPropIndex(GetPlayerPed(-1), 2, 30 - 1, 1 - 1, 2)
-        elseif ears == 13 then
-            SetPedPropIndex(GetPlayerPed(-1), 2, 31 - 1, 1 - 1, 2)
-        elseif ears == 14 then
-            SetPedPropIndex(GetPlayerPed(-1), 2, 32 - 1, 1 - 1, 2)
-        elseif ears == 15 then
-            SetPedPropIndex(GetPlayerPed(-1), 2, 33 - 1, 1 - 1, 2)
-        end
-
-        -- Keep these 4 variations together.
-        -- It avoids empty arms or noisy clothes superposition
-        if tops == 0 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 15, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 15, 0, 2) -- Torso 2
-        elseif tops == 1 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 0, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 0, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 0, 1, 2) -- Torso 2
-        elseif tops == 2 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 0, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 0, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 0, 7, 2) -- Torso 2
-        elseif tops == 3 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 2, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 2, 9, 2) -- Torso 2
-        elseif tops == 4 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 6, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 5, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 3, 11, 2) -- Torso 2
-        elseif tops == 5 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 6, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 5, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 3, 15, 2) -- Torso 2
-        elseif tops == 6 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 6, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 23, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 4, 0, 2) -- Torso 2
-        elseif tops == 7 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 6, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 4, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 4, 0, 2) -- Torso 2
-        elseif tops == 8 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 6, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 26, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 4, 0, 2) -- Torso 2
-        elseif tops == 9 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 5, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 5, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 5, 0, 2) -- Torso 2
-        elseif tops == 10 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 2, 4, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 6, 11, 2) -- Torso 2
-        elseif tops == 11 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 2, 4, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 6, 0, 2) -- Torso 2
-        elseif tops == 12 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 2, 4, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 6, 3, 2) -- Torso 2
-        elseif tops == 13 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 23, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 7, 4, 2) -- Torso 2
-        elseif tops == 14 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 23, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 7, 10, 2) -- Torso 2
-        elseif tops == 15 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 23, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 7, 12, 2) -- Torso 2
-        elseif tops == 16 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 23, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 7, 13, 2) -- Torso 2
-        elseif tops == 17 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 0, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 9, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 9, 0, 2) -- Torso 2
-        elseif tops == 18 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 4, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 10, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 10, 0, 2) -- Torso 2
-        elseif tops == 19 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 4, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 12, 2, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 10, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 10, 0, 2) -- Torso 2
-        elseif tops == 20 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 4, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 18, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 10, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 10, 0, 2) -- Torso 2
-        elseif tops == 21 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 4, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 11, 2, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 10, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 10, 0, 2) -- Torso 2
-        elseif tops == 22 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 12, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 12, 10, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 12, 10, 2) -- Torso 2
-        elseif tops == 23 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 11, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 13, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 13, 0, 2) -- Torso 2
-        elseif tops == 24 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 14, 0, 2) -- Torso 2
-        elseif tops == 25 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 14, 1, 2) -- Torso 2
-        elseif tops == 26 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 0, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 16, 0, 2) -- Torso 2
-        elseif tops == 27 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 0, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 16, 1, 2) -- Torso 2
-        elseif tops == 28 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 0, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 16, 2, 2) -- Torso 2
-        elseif tops == 29 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 5, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 17, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 17, 0, 2) -- Torso 2
-        elseif tops == 30 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 5, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 17, 1, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 17, 1, 2) -- Torso 2
-        elseif tops == 31 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 5, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 17, 4, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 17, 4, 2) -- Torso 2
-        elseif tops == 32 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 11, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 27, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 26, 0, 2) -- Torso 2
-        elseif tops == 33 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 11, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 27, 5, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 26, 5, 2) -- Torso 2
-        elseif tops == 34 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 11, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 27, 6, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 26, 6, 2) -- Torso 2
-        elseif tops == 35 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 63, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 31, 0, 2) -- Torso 2
-        elseif tops == 36 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 5, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 57, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 36, 4, 2) -- Torso 2
-        elseif tops == 37 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 5, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 57, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 36, 5, 2) -- Torso 2
-        elseif tops == 38 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 24, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 37, 0, 2) -- Torso 2
-        elseif tops == 39 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 24, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 37, 1, 2) -- Torso 2
-        elseif tops == 40 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 24, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 37, 2, 2) -- Torso 2
-        elseif tops == 41 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 8, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 38, 0, 2) -- Torso 2
-        elseif tops == 42 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 8, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 38, 3, 2) -- Torso 2
-        elseif tops == 43 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 0, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 39, 0, 2) -- Torso 2
-        elseif tops == 44 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 0, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 39, 1, 2) -- Torso 2
-        elseif tops == 45 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 41, 0, 2) -- Torso 2
-        elseif tops == 46 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 11, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 42, 0, 2) -- Torso 2
-        elseif tops == 47 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 50, 0, 2) -- Torso 2
-        elseif tops == 48 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 50, 3, 2) -- Torso 2
-        elseif tops == 49 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 50, 4, 2) -- Torso 2
-        elseif tops == 50 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 57, 0, 2) -- Torso 2
-        elseif tops == 51 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 50, 1, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 23, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 70, 0, 2) -- Torso 2
-        elseif tops == 52 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 50, 1, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 23, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 70, 1, 2) -- Torso 2
-        elseif tops == 53 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 50, 1, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 23, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 70, 7, 2) -- Torso 2
-        elseif tops == 54 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 3, 1, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 72, 1, 2) -- Torso 2
-        elseif tops == 55 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 6, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 87, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 5, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 74, 0, 2) -- Torso 2
-        elseif tops == 56 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 12, 2, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 28, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 77, 0, 2) -- Torso 2
-        elseif tops == 57 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 15, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 79, 0, 2) -- Torso 2
-        elseif tops == 58 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 0, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 80, 0, 2) -- Torso 2
-        elseif tops == 59 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 0, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 80, 1, 2) -- Torso 2
-        elseif tops == 60 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 0, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 82, 5, 2) -- Torso 2
-        elseif tops == 61 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 0, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 82, 8, 2) -- Torso 2
-        elseif tops == 62 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 0, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 82, 9, 2) -- Torso 2
-        elseif tops == 63 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 0, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 86, 0, 2) -- Torso 2
-        elseif tops == 64 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 0, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 86, 2, 2) -- Torso 2
-        elseif tops == 65 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 0, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 86, 4, 2) -- Torso 2
-        elseif tops == 66 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 0, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 87, 11, 2) -- Torso 2
-        elseif tops == 67 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 0, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 87, 0, 2) -- Torso 2
-        elseif tops == 68 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 0, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 87, 1, 2) -- Torso 2
-        elseif tops == 69 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 0, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 87, 2, 2) -- Torso 2
-        elseif tops == 70 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 0, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 87, 4, 2) -- Torso 2
-        elseif tops == 71 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 0, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 87, 8, 2) -- Torso 2
-        elseif tops == 72 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 0, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 89, 0, 2) -- Torso 2
-        elseif tops == 73 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 11, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 95, 0, 2) -- Torso 2
-        elseif tops == 74 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 31, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 99, 1, 2) -- Torso 2
-        elseif tops == 75 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 31, 13, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 99, 3, 2) -- Torso 2
-        elseif tops == 76 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 31, 13, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 101, 0, 2) -- Torso 2
-        elseif tops == 77 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 0, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 105, 0, 2) -- Torso 2
-        elseif tops == 78 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 10, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 106, 0, 2) -- Torso 2
-        elseif tops == 79 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 73, 2, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 109, 0, 2) -- Torso 2
-        elseif tops == 80 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 4, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 111, 0, 2) -- Torso 2
-        elseif tops == 81 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 4, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 111, 3, 2) -- Torso 2
-        elseif tops == 82 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 113, 0, 2) -- Torso 2
-        elseif tops == 83 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 126, 5, 2) -- Torso 2
-        elseif tops == 84 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 126, 9, 2) -- Torso 2
-        elseif tops == 85 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 126, 10, 2) -- Torso 2
-        elseif tops == 86 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 126, 14, 2) -- Torso 2
-        elseif tops == 87 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 0, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 131, 0, 2) -- Torso 2
-        elseif tops == 88 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 134, 0, 2) -- Torso 2
-        elseif tops == 89 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 134, 1, 2) -- Torso 2
-        elseif tops == 90 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 143, 0, 2) -- Torso 2
-        elseif tops == 91 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 143, 2, 2) -- Torso 2
-        elseif tops == 92 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 143, 4, 2) -- Torso 2
-        elseif tops == 93 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 143, 5, 2) -- Torso 2
-        elseif tops == 94 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 143, 6, 2) -- Torso 2
-        elseif tops == 95 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 143, 8, 2) -- Torso 2
-        elseif tops == 96 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 143, 9, 2) -- Torso 2
-        elseif tops == 97 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 0, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 146, 0, 2) -- Torso 2
-        elseif tops == 98 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 16, 2, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 166, 0, 2) -- Torso 2
-        elseif tops == 99 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 38, 1, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 167, 0, 2) -- Torso 2
-        elseif tops == 100 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 38, 1, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 167, 4, 2) -- Torso 2
-        elseif tops == 101 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 38, 1, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 167, 6, 2) -- Torso 2
-        elseif tops == 102 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 38, 1, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 167, 12, 2) -- Torso 2
-        elseif tops == 103 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 38, 1, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 169, 0, 2) -- Torso 2
-        elseif tops == 104 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 38, 1, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 172, 0, 2) -- Torso 2
-        elseif tops == 105 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 2, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 38, 1, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 173, 0, 2) -- Torso 2
-        elseif tops == 106 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 2, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 41, 2, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 185, 0, 2) -- Torso 2
-        elseif tops == 107 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 2, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 202, 0, 2) -- Torso 2
-        elseif tops == 108 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 203, 10, 2) -- Torso 2
-        elseif tops == 109 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 203, 16, 2) -- Torso 2
-        elseif tops == 110 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 203, 25, 2) -- Torso 2
-        elseif tops == 111 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 2, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 205, 0, 2) -- Torso 2
-        elseif tops == 112 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 0, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 226, 0, 2) -- Torso 2
-        elseif tops == 113 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 257, 0, 2) -- Torso 2
-        elseif tops == 114 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 257, 9, 2) -- Torso 2
-        elseif tops == 115 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 257, 17, 2) -- Torso 2
-        elseif tops == 116 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 1, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 259, 9, 2) -- Torso 2
-        elseif tops == 117 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 5, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 5, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 269, 2, 2) -- Torso 2
-        elseif tops == 118 then
-            SetPedComponentVariation(GetPlayerPed(-1), 3, 0, 0, 2) -- Torso
-            SetPedComponentVariation(GetPlayerPed(-1), 7, 0, 0, 2) -- Neck
-            SetPedComponentVariation(GetPlayerPed(-1), 8, 15, 0, 2) -- Undershirt
-            SetPedComponentVariation(GetPlayerPed(-1), 11, 282, 6, 2) -- Torso 2
-        end
-
-        if pants == 0 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 61, 4, 2)
-        elseif pants == 1 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 0, 0, 2)
-        elseif pants == 2 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 0, 2, 2)
-        elseif pants == 3 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 1, 12, 2)
-        elseif pants == 4 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 2, 11, 2)
-        elseif pants == 5 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 3, 0, 2)
-        elseif pants == 6 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 4, 0, 2)
-        elseif pants == 7 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 4, 1, 2)
-        elseif pants == 8 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 4, 4, 2)
-        elseif pants == 9 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 5, 0, 2)
-        elseif pants == 10 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 5, 2, 2)
-        elseif pants == 11 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 7, 0, 2)
-        elseif pants == 12 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 7, 1, 2)
-        elseif pants == 13 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 9, 0, 2)
-        elseif pants == 14 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 9, 1, 2)
-        elseif pants == 15 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 10, 0, 2)
-        elseif pants == 16 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 10, 2, 2)
-        elseif pants == 17 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 12, 0, 2)
-        elseif pants == 18 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 12, 5, 2)
-        elseif pants == 19 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 12, 7, 2)
-        elseif pants == 20 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 14, 0, 2)
-        elseif pants == 21 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 14, 1, 2)
-        elseif pants == 22 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 14, 3, 2)
-        elseif pants == 23 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 15, 0, 2)
-        elseif pants == 24 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 20, 0, 2)
-        elseif pants == 25 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 24, 0, 2)
-        elseif pants == 26 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 24, 1, 2)
-        elseif pants == 27 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 24, 5, 2)
-        elseif pants == 28 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 26, 0, 2)
-        elseif pants == 29 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 26, 4, 2)
-        elseif pants == 30 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 26, 5, 2)
-        elseif pants == 31 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 26, 6, 2)
-        elseif pants == 32 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 28, 0, 2)
-        elseif pants == 33 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 28, 3, 2)
-        elseif pants == 34 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 28, 8, 2)
-        elseif pants == 35 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 28, 14, 2)
-        elseif pants == 36 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 42, 0, 2)
-        elseif pants == 37 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 42, 1, 2)
-        elseif pants == 38 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 48, 0, 2)
-        elseif pants == 39 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 48, 1, 2)
-        elseif pants == 40 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 49, 0, 2)
-        elseif pants == 41 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 49, 1, 2)
-        elseif pants == 42 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 54, 1, 2)
-        elseif pants == 43 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 55, 0, 2)
-        elseif pants == 44 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 60, 2, 2)
-        elseif pants == 45 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 60, 9, 2)
-        elseif pants == 46 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 71, 0, 2)
-        elseif pants == 47 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 75, 2, 2)
-        elseif pants == 48 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 76, 2, 2)
-        elseif pants == 49 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 78, 0, 2)
-        elseif pants == 50 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 78, 2, 2)
-        elseif pants == 51 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 78, 4, 2)
-        elseif pants == 52 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 82, 0, 2)
-        elseif pants == 53 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 82, 2, 2)
-        elseif pants == 54 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 82, 3, 2)
-        elseif pants == 55 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 86, 9, 2)
-        elseif pants == 56 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 88, 9, 2)
-        elseif pants == 57 then
-            SetPedComponentVariation(GetPlayerPed(-1), 4, 100, 9, 2)
-        end
-
-        if shoes == 0 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 34, 0, 2)
-        elseif shoes == 1 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 0, 10, 2)
-        elseif shoes == 2 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 1, 0, 2)
-        elseif shoes == 3 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 1, 1, 2)
-        elseif shoes == 4 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 1, 3, 2)
-        elseif shoes == 5 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 3, 0, 2)
-        elseif shoes == 6 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 3, 6, 2)
-        elseif shoes == 7 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 3, 14, 2)
-        elseif shoes == 8 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 48, 0, 2)
-        elseif shoes == 9 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 48, 1, 2)
-        elseif shoes == 10 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 49, 0, 2)
-        elseif shoes == 11 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 49, 1, 2)
-        elseif shoes == 12 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 5, 0, 2)
-        elseif shoes == 13 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 6, 0, 2)
-        elseif shoes == 14 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 7, 0, 2)
-        elseif shoes == 15 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 7, 9, 2)
-        elseif shoes == 16 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 7, 13, 2)
-        elseif shoes == 17 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 9, 3, 2)
-        elseif shoes == 18 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 9, 6, 2)
-        elseif shoes == 19 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 9, 7, 2)
-        elseif shoes == 20 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 10, 0, 2)
-        elseif shoes == 21 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 12, 0, 2)
-        elseif shoes == 22 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 12, 2, 2)
-        elseif shoes == 23 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 12, 13, 2)
-        elseif shoes == 24 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 15, 0, 2)
-        elseif shoes == 25 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 15, 1, 2)
-        elseif shoes == 26 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 16, 0, 2)
-        elseif shoes == 27 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 20, 0, 2)
-        elseif shoes == 28 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 24, 0, 2)
-        elseif shoes == 29 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 27, 0, 2)
-        elseif shoes == 30 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 28, 0, 2)
-        elseif shoes == 31 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 28, 1, 2)
-        elseif shoes == 32 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 28, 3, 2)
-        elseif shoes == 33 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 28, 2, 2)
-        elseif shoes == 34 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 31, 2, 2)
-        elseif shoes == 35 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 31, 4, 2)
-        elseif shoes == 36 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 36, 0, 2)
-        elseif shoes == 37 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 36, 3, 2)
-        elseif shoes == 38 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 42, 0, 2)
-        elseif shoes == 39 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 42, 1, 2)
-        elseif shoes == 40 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 42, 7, 2)
-        elseif shoes == 41 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 57, 0, 2)
-        elseif shoes == 42 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 57, 3, 2)
-        elseif shoes == 43 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 57, 8, 2)
-        elseif shoes == 44 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 57, 9, 2)
-        elseif shoes == 45 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 57, 10, 2)
-        elseif shoes == 46 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 57, 11, 2)
-        elseif shoes == 47 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 75, 4, 2)
-        elseif shoes == 48 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 75, 7, 2)
-        elseif shoes == 49 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 75, 8, 2)
-        elseif shoes == 50 then
-            SetPedComponentVariation(GetPlayerPed(-1), 6, 77, 0, 2)
-        end
-
-        if watches == 0 then
-            ClearPedProp(GetPlayerPed(-1), 6)
-        elseif watches == 1 then
-            SetPedPropIndex(GetPlayerPed(-1), 6, 1 - 1, 1 - 1, 2)
-        elseif watches == 2 then
-            SetPedPropIndex(GetPlayerPed(-1), 6, 2 - 1, 1 - 1, 2)
-        elseif watches == 3 then
-            SetPedPropIndex(GetPlayerPed(-1), 6, 4 - 1, 1 - 1, 2)
-        elseif watches == 4 then
-            SetPedPropIndex(GetPlayerPed(-1), 6, 4 - 1, 3 - 1, 2)
-        elseif watches == 5 then
-            SetPedPropIndex(GetPlayerPed(-1), 6, 5 - 1, 1 - 1, 2)
-        elseif watches == 6 then
-            SetPedPropIndex(GetPlayerPed(-1), 6, 9 - 1, 1 - 1, 2)
-        elseif watches == 7 then
-            SetPedPropIndex(GetPlayerPed(-1), 6, 11 - 1, 1 - 1, 2)
-        end
-
-        -- Unused yet
-        -- These presets will be editable in V2 release
-        SetPedHeadOverlay(GetPlayerPed(-1), 4, 0, 0.0) -- Lipstick
-        SetPedHeadOverlay(GetPlayerPed(-1), 8, 0, 0.0) -- Makeup
-        SetPedHeadOverlayColor(GetPlayerPed(-1), 4, 1, 0, 0) -- Makeup Color
-        SetPedHeadOverlayColor(GetPlayerPed(-1), 8, 1, 0, 0) -- Lipstick Color
-        SetPedComponentVariation(GetPlayerPed(-1), 1, 0, 0, 2) -- Mask
+        ClearAllAnimations(previewPed)
+        DeleteEntity(previewPed)
+        previewPed = nil
     end
 end
 
-RegisterNUICallback('updateSkin', function(data)
-    updateSkin(data)
-end)
-
-RegisterNUICallback('rotateleftheading', function(data)
-    local currentHeading = GetEntityHeading(GetPlayerPed(-1))
-    heading = currentHeading + tonumber(data.value)
-end)
-
-RegisterNUICallback('rotaterightheading', function(data)
-    local currentHeading = GetEntityHeading(GetPlayerPed(-1))
-    heading = currentHeading - tonumber(data.value)
-end)
-
-RegisterNUICallback('zoom', function(data)
-    zoom = data.zoom
-end)
-
-function SkinCreator(enable)
-    local ped = GetPlayerPed(-1)
-    ShowSkinCreator(enable)
-
-    -- Disable Controls
-    -- TODO: Reset controls when player confirm his character creation
-    if enable == true then
-        DisableControlAction(2, 14, true)
-        DisableControlAction(2, 15, true)
-        DisableControlAction(2, 16, true)
-        DisableControlAction(2, 17, true)
-        DisableControlAction(2, 30, true)
-        DisableControlAction(2, 31, true)
-        DisableControlAction(2, 32, true)
-        DisableControlAction(2, 33, true)
-        DisableControlAction(2, 34, true)
-        DisableControlAction(2, 35, true)
-        DisableControlAction(0, 25, true)
-        DisableControlAction(0, 24, true)
-
-        if IsDisabledControlJustReleased(0, 24) or IsDisabledControlJustReleased(0, 142) then -- MeleeAttackAlternate
-            SendNUIMessage({
-                action = "skincreator",
-                type = "click"
-            })
-        end
-
-        -- Player
-        SetPlayerInvincible(ped, true)
-
-        -- Camera
-        RenderScriptCams(false, false, 0, 1, 0)
-        DestroyCam(cam, false)
-        if (not DoesCamExist(cam)) then
-            cam = CreateCam('DEFAULT_SCRIPTED_CAMERA', true)
-            SetCamCoord(cam, GetEntityCoords(GetPlayerPed(-1)))
-            SetCamRot(cam, 0.0, 0.0, 0.0)
-            SetCamActive(cam, true)
-            RenderScriptCams(true, false, 0, true, true)
-            SetCamCoord(cam, GetEntityCoords(GetPlayerPed(-1)))
-        end
-        local x, y, z = table.unpack(GetEntityCoords(GetPlayerPed(-1)))
-        if zoom == "visage" or zoom == "pilosite" then
-            SetCamCoord(cam, x + 0.2, y + 0.5, z + 0.7)
-            SetCamRot(cam, 0.0, 0.0, 150.0)
-        elseif zoom == "vetements" then
-            SetCamCoord(cam, x + 0.3, y + 2.0, z + 0.0)
-            SetCamRot(cam, 0.0, 0.0, 170.0)
-        end
-    else
-        FreezeEntityPosition(ped, false)
-        SetPlayerInvincible(ped, false)
-    end
-end
-
-function ShowSkinCreator(enable)
-    SetNuiFocus(enable)
+function setVisible(visible)
+    SetNuiFocus(visible, visible)
     SendNUIMessage({
-        action = "skincreator",
-        openSkinCreator = enable
+        action = 'setVisible',
+        show = visible
+    })
+    isVisible = visible
+    DisplayRadar(not visible)
+end
+
+function ResetAllTabs()
+    local clothes = nil
+
+    for k, v in pairs(openTabs) do
+        if openTabs[k] == 'apparel' then
+            clothes = GetClothesData()
+        end
+    end
+
+    SendNUIMessage({
+        action = 'enableTabs',
+        tabs = openTabs,
+        character = currentChar,
+        clothes = clothes,
+        identity = currentIdentity
     })
 end
 
-RegisterNetEvent('easyCore:client:loadskin')
-AddEventHandler('easyCore:client:loadskin',
-    function(dad, mum, dadmumpercent, skin, eyecolor, acne, skinproblem, freckle, wrinkle, wrinkleopacity, eyebrow,
-        eyebrowopacity, beard, beardopacity, beardcolor, hair, haircolor, torso, torsotext, leg, legtext, shoes,
-        shoestext, accessory, accessorytext, undershirt, undershirttext, torso2, torso2text, prop_hat, prop_hat_text,
-        prop_glasses, prop_glasses_text, prop_earrings, prop_earrings_text, prop_watches, prop_watches_text)
-        updateSkin({
-            ["value"] = false,
+function GetLoadout()
+    local result = {}
 
-            ['dad'] = dad,
-            ['mum'] = mum,
-            ['dadmumpercent'] = dadmumpercent,
-            ['skin'] = skin,
-            ['eyecolor'] = eyecolor,
-            ['acne'] = acne,
-            ['skinproblem'] = skinproblem,
-            ['freckle'] = freckle,
-            ['wrinkle'] = wrinkle,
-            ['wrinkleopacity'] = wrinkleopacity,
-            ['eyebrow'] = eyebrow,
-            ['eyebrowopacity'] = eyebrowopacity,
-            ['beard'] = beard,
-            ['beardopacity'] = beardopacity,
-            ['beardcolor'] = beardcolor,
-            ['hair'] = hair,
-            ['hairtext'] = haircolor,
-            ['torso'] = torso,
-            ['torsotext'] = torsotext,
-            ['leg'] = leg,
-            ['legtext'] = legtext,
-            ['shoes'] = shoes,
-            ['shoestext'] = shoestext,
-            ['accessory'] = accessory,
-            ['accessorytext'] = accessorytext,
-            ['undershirt'] = undershirt,
-            ['undershirttext'] = undershirttext,
-            ['torso2'] = torso2,
-            ['torso2text'] = torso2text,
-            ['prop_hat'] = prop_hat,
-            ['prop_hat_text'] = prop_hat_text,
-            ['prop_glasses'] = prop_glasses,
-            ['prop_glasses_text'] = prop_glasses_text,
-            ['prop_earrings'] = prop_earrings,
-            ['prop_earrings_text'] = prop_earrings_text,
-            ['prop_watches'] = prop_watches,
-            ['prop_watches_text'] = prop_watches_text
+    return result
+end
+
+function UpdateClothes(data)
+    local playerPed = PlayerPedId()
+
+    currentChar.sex = data.sex or currentChar.sex
+    currentChar.tshirt_1 = data.tshirt_1 or currentChar.tshirt_1
+    currentChar.tshirt_2 = data.tshirt_2 or currentChar.tshirt_2
+    currentChar.torso_1 = data.torso_1 or currentChar.torso_1
+    currentChar.torso_2 = data.torso_2 or currentChar.torso_2
+    currentChar.decals_1 = data.decals_1 or currentChar.decals_1
+    currentChar.decals_2 = data.decals_2 or currentChar.decals_2
+    currentChar.arms = data.arms or currentChar.arms
+    currentChar.arms_2 = data.arms_2 or currentChar.arms_2
+    currentChar.pants_1 = data.pants_1 or currentChar.pants_1
+    currentChar.pants_2 = data.pants_2 or currentChar.pants_2
+    currentChar.shoes_1 = data.shoes_1 or currentChar.shoes_1
+    currentChar.shoes_2 = data.shoes_2 or currentChar.shoes_2
+    currentChar.mask_1 = data.mask_1 or currentChar.mask_1
+    currentChar.mask_2 = data.mask_2 or currentChar.mask_2
+    currentChar.bproof_1 = data.bproof_1 or currentChar.bproof_1
+    currentChar.bproof_2 = data.bproof_2 or currentChar.bproof_2
+    currentChar.neckarm_1 = data.chain_1 or data.neckarm_1 or currentChar.chain_1
+    currentChar.neckarm_2 = data.chain_2 or data.neckarm_2 or currentChar.chain_2
+    currentChar.helmet_1 = data.helmet_1 or currentChar.helmet_1
+    currentChar.helmet_2 = data.helmet_2 or currentChar.helmet_2
+    currentChar.glasses_1 = data.glasses_1 or currentChar.glasses_1
+    currentChar.glasses_2 = data.glasses_2 or currentChar.glasses_2
+    currentChar.lefthand_1 = data.watches_1 or data.lefthand_1 or currentChar.watches_1 or currentChar.lefthand_1
+    currentChar.lefthand_2 = data.watches_2 or data.lefthand_2 or currentChar.watches_2 or currentChar.lefthand_2
+    currentChar.righthand_1 = data.bracelets_1 or data.righthand_1 or currentChar.bracelets_1 or currentChar.righthand_1
+    currentChar.righthand_2 = data.bracelets_2 or data.righthand_2 or currentChar.bracelets_2 or currentChar.righthand_2
+    currentChar.bags_1 = data.bags_1 or currentChar.bags_1
+    currentChar.bags_2 = data.bags_2 or currentChar.bags_2
+    currentChar.ears_1 = data.ears_1 or currentChar.ears_1
+    currentChar.ears_2 = data.ears_2 or currentChar.ears_2
+
+    SetPedComponentVariation(playerPed, 8, currentChar.tshirt_1, currentChar.tshirt_2, 2)
+    SetPedComponentVariation(playerPed, 11, currentChar.torso_1, currentChar.torso_2, 2)
+    SetPedComponentVariation(playerPed, 10, currentChar.decals_1, currentChar.decals_2, 2)
+    SetPedComponentVariation(playerPed, 3, currentChar.arms, currentChar.arms_2, 2)
+    SetPedComponentVariation(playerPed, 4, currentChar.pants_1, currentChar.pants_2, 2)
+    SetPedComponentVariation(playerPed, 6, currentChar.shoes_1, currentChar.shoes_2, 2)
+    SetPedComponentVariation(playerPed, 1, currentChar.mask_1, currentChar.mask_2, 2)
+    SetPedComponentVariation(playerPed, 9, currentChar.bproof_1, currentChar.bproof_2, 2)
+    SetPedComponentVariation(playerPed, 7, currentChar.neckarm_1, currentChar.neckarm_2, 2)
+    SetPedComponentVariation(playerPed, 5, currentChar.bags_1, currentChar.bags_2, 2)
+
+    if currentChar.helmet_1 == -1 then
+        ClearPedProp(playerPed, 0)
+    else
+        SetPedPropIndex(playerPed, 0, currentChar.helmet_1, currentChar.helmet_2, 2)
+    end
+
+    if currentChar.glasses_1 == -1 then
+        ClearPedProp(playerPed, 1)
+    else
+        SetPedPropIndex(playerPed, 1, currentChar.glasses_1, currentChar.glasses_2, 2)
+    end
+
+    if currentChar.lefthand_1 == -1 then
+        ClearPedProp(playerPed, 6)
+    else
+        SetPedPropIndex(playerPed, 6, currentChar.lefthand_1, currentChar.lefthand_2, 2)
+    end
+
+    if currentChar.righthand_1 == -1 then
+        ClearPedProp(playerPed, 7)
+    else
+        SetPedPropIndex(playerPed, 7, currentChar.righthand_1, currentChar.righthand_2, 2)
+    end
+
+    if currentChar.ears_1 == -1 then
+        ClearPedProp(playerPed, 2)
+    else
+        SetPedPropIndex(playerPed, 2, currentChar.ears_1, currentChar.ears_2, 2)
+    end
+end
+
+RegisterNetEvent('skinchanger:loadClothes')
+AddEventHandler('skinchanger:loadClothes', function(playerSkin, clothesSkin)
+    UpdateClothes(clothesSkin, false)
+end)
+
+RegisterNetEvent('skinchanger:loadSkin')
+AddEventHandler('skinchanger:loadSkin', function(skin, cb)
+    local newChar = GetDefaultCharacter(skin['sex'] == 0)
+
+    -- corrections for changed data format and names
+    local changed = {}
+    changed.chain_1 = 'neckarm_1'
+    changed.chain_2 = 'neckarm_2'
+    changed.watches_1 = 'lefthand_1'
+    changed.watches_2 = 'lefthand_2'
+    changed.bracelets_1 = 'righthand_1'
+    changed.bracelets_2 = 'righthand_2'
+
+    for k, v in pairs(skin) do
+        if k ~= 'face' and k ~= 'skin' then
+            if changed[k] == nil then
+                newChar[k] = v
+            else
+                newChar[changed[k]] = v
+            end
+        end
+    end
+
+    oldLoadout = GetLoadout()
+    LoadCharacter(newChar, cb)
+end)
+
+AddEventHandler('skinchanger:loadDefaultModel', function(loadMale, cb)
+    local defaultChar = GetDefaultCharacter(loadMale)
+    oldLoadout = GetLoadout()
+    LoadCharacter(defaultChar, cb)
+end)
+
+AddEventHandler('skinchanger:change', function(key, val)
+    --[[
+            IMPORTANT: This is provided only for compatibility reasons.
+            It's VERY inefficient as it reloads entire character for a single change.
+            DON'T USE IT.
+    ]]
+
+    local changed = {}
+    changed.chain_1 = 'neckarm_1'
+    changed.chain_2 = 'neckarm_2'
+    changed.watches_1 = 'lefthand_1'
+    changed.watches_2 = 'lefthand_2'
+    changed.bracelets_1 = 'righthand_1'
+    changed.bracelets_2 = 'righthand_2'
+
+    if key ~= 'face' and key ~= 'skin' then
+        if changed[key] == nil then
+            currentChar[key] = val
+        else
+            currentChar[changed[key]] = val
+        end
+
+        -- TODO: (!) Rewrite this to only load changed part.
+        oldLoadout = GetLoadout()
+        LoadCharacter(currentChar, cb)
+    end
+end)
+
+AddEventHandler('skinchanger:getSkin', function(cb)
+    cb(currentChar)
+end)
+
+AddEventHandler('cui_character:close', function(save)
+    if (not save) and (not isCancelable) then
+        return
+    end
+
+    -- Saving and discarding changes
+    if save then
+        TriggerServerEvent('cui_character:save', currentChar)
+    end
+
+    EndCharacterPreview(save)
+
+    -- Release character models and ui textures
+    SetModelAsNoLongerNeeded(GetHashKey('mp_m_freemode_01'))
+    SetModelAsNoLongerNeeded(GetHashKey('mp_f_freemode_01'))
+    SetStreamedTextureDictAsNoLongerNeeded('mparrow')
+    SetStreamedTextureDictAsNoLongerNeeded('mpleaderboard')
+    if identityLoaded == true then
+        SetStreamedTextureDictAsNoLongerNeeded('pause_menu_pages_char_mom_dad')
+        SetStreamedTextureDictAsNoLongerNeeded('char_creator_portraits')
+        identityLoaded = false
+    end
+
+    Camera.Deactivate()
+
+    isCancelable = true
+    setVisible(false)
+
+    for i = 0, #openTabs do
+        openTabs[i] = nil
+    end
+end)
+
+RegisterNetEvent('cui_character:open')
+AddEventHandler('cui_character:open', function(tabs, cancelable)
+    if isOnDuty then
+        AddTextEntry('notifyOnDuty', 'You cannot access this command while ~r~on duty~s~.')
+        BeginTextCommandThefeedPost('notifyOnDuty')
+        ThefeedNextPostBackgroundColor(140)
+        EndTextCommandThefeedPostTicker(false, false)
+        isInterfaceOpening = false
+        return
+    end
+
+    if isInterfaceOpening then
+        return
+    end
+
+    isInterfaceOpening = true
+
+    if cancelable ~= nil then
+        isCancelable = cancelable
+    end
+
+    while (not initialized) or (not isModelLoaded) or (not isPlayerReady) do
+        Citizen.Wait(100)
+    end
+
+    -- Request character models and ui textures
+    local maleModelHash = GetHashKey('mp_m_freemode_01')
+    local femaleModelHash = GetHashKey('mp_f_freemode_01')
+    RequestModel(maleModelHash)
+    RequestModel(femaleModelHash)
+    RequestStreamedTextureDict('mparrow')
+    RequestStreamedTextureDict('mpleaderboard')
+    while not HasStreamedTextureDictLoaded('mparrow') or not HasStreamedTextureDictLoaded('mpleaderboard') or
+        not HasModelLoaded(maleModelHash) or not HasModelLoaded(femaleModelHash) do
+        Wait(100)
+    end
+
+    BeginCharacterPreview()
+
+    SendNUIMessage({
+        action = 'clearAllTabs'
+    })
+
+    local firstTabName = ''
+    local clothes = nil
+    for i = 0, #openTabs do
+        openTabs[i] = nil
+    end
+
+    for k, v in pairs(tabs) do
+        if k == 1 then
+            firstTabName = v
+        end
+
+        local tabName = tabs[k]
+        table.insert(openTabs, tabName)
+        if tabName == 'identity' then
+            if not identityLoaded then
+                RequestStreamedTextureDict('pause_menu_pages_char_mom_dad')
+                RequestStreamedTextureDict('char_creator_portraits')
+                while not HasStreamedTextureDictLoaded('pause_menu_pages_char_mom_dad') or
+                    not HasStreamedTextureDictLoaded('char_creator_portraits') do
+                    Wait(100)
+                end
+                identityLoaded = true
+            end
+        elseif tabName == 'apparel' then
+            -- load clothes data from natives here
+            clothes = GetClothesData()
+        end
+    end
+
+    SendNUIMessage({
+        action = 'enableTabs',
+        tabs = tabs,
+        character = currentChar,
+        clothes = clothes,
+        identity = currentIdentity
+    })
+
+    SendNUIMessage({
+        action = 'activateTab',
+        tab = firstTabName
+    })
+
+    if newCharacter then
+        Camera.Activate(500)
+    else
+        Camera.Activate()
+    end
+
+    SendNUIMessage({
+        action = 'refreshViewButtons',
+        view = Camera.currentView
+    })
+
+    SendNUIMessage({
+        action = 'setCancelable',
+        value = isCancelable
+    })
+
+    setVisible(true)
+    isInterfaceOpening = false
+end)
+
+AddEventHandler('cui_character:playerPrepared', function(newplayer)
+    if newplayer then
+        TriggerEvent('cui_character:open', {'identity', 'features', 'style', 'apparel'}, false)
+    end
+end)
+
+AddEventHandler('cui_character:getCurrentClothes', function(cb)
+    local result = {}
+
+    result.sex = currentChar.sex
+    result.tshirt_1 = currentChar.tshirt_1
+    result.tshirt_2 = currentChar.tshirt_2
+    result.torso_1 = currentChar.torso_1
+    result.torso_2 = currentChar.torso_2
+    result.decals_1 = currentChar.decals_1
+    result.decals_2 = currentChar.decals_2
+    result.arms = currentChar.arms
+    result.arms_2 = currentChar.arms_2
+    result.pants_1 = currentChar.pants_1
+    result.pants_2 = currentChar.pants_2
+    result.shoes_1 = currentChar.shoes_1
+    result.shoes_2 = currentChar.shoes_2
+    result.mask_1 = currentChar.mask_1
+    result.mask_2 = currentChar.mask_2
+    result.bproof_1 = currentChar.bproof_1
+    result.bproof_2 = currentChar.bproof_2
+    result.neckarm_1 = currentChar.chain_1 or currentChar.neckarm_1
+    result.neckarm_2 = currentChar.chain_2 or currentChar.neckarm_2
+    result.helmet_1 = currentChar.helmet_1
+    result.helmet_2 = currentChar.helmet_2
+    result.glasses_1 = currentChar.glasses_1
+    result.glasses_2 = currentChar.glasses_2
+    result.lefthand_1 = currentChar.watches_1 or currentChar.lefthand_1
+    result.lefthand_2 = currentChar.watches_2 or currentChar.lefthand_2
+    result.righthand_1 = currentChar.bracelets_1 or currentChar.righthand_1
+    result.righthand_2 = currentChar.bracelets_2 or currentChar.righthand_2
+    result.bags_1 = currentChar.bags_1
+    result.bags_2 = currentChar.bags_2
+    result.ears_1 = currentChar.ears_1
+    result.ears_2 = currentChar.ears_2
+
+    cb(result)
+end)
+
+AddEventHandler('cui_character:updateClothes', function(data, save, updateOld, callback)
+    UpdateClothes(data, updateOld)
+    if save then
+        TriggerServerEvent('cui_character:save', currentChar)
+    end
+    if callback then
+        callback()
+    end
+end)
+
+AddEventHandler('onClientResourceStart', function(resource)
+    if resource == GetCurrentResourceName() then
+        Citizen.CreateThread(function()
+            Citizen.Wait(250)
+            TriggerServerEvent('cui_character:requestPlayerData')
+        end)
+    end
+end)
+
+RegisterNetEvent('cui_character:recievePlayerData')
+AddEventHandler('cui_character:recievePlayerData', function(playerData)
+    isPlayerNew = playerData.newPlayer
+    if not isPlayerNew then
+        LoadCharacter(playerData.skin)
+    else
+        LoadCharacter(GetDefaultCharacter(true))
+    end
+    preparingSkin = false
+    playerLoaded = true
+    ShutdownLoadingScreen()
+    ShutdownLoadingScreenNui()
+end)
+
+Citizen.CreateThread(function()
+    while preparingSkin do
+        Citizen.Wait(100)
+    end
+    TriggerEvent('cui_character:playerPrepared', isPlayerNew)
+    firstSpawn = false
+
+    while not initialized do
+        SendNUIMessage({
+            action = 'loadInitData',
+            hair = GetColorData(GetHairColors(), true),
+            lipstick = GetColorData(GetLipstickColors(), false),
+            facepaint = GetColorData(GetFacepaintColors(), false),
+            blusher = GetColorData(GetBlusherColors(), false),
+            naturaleyecolors = SkinCreatorConfig.UseNaturalEyeColors,
+
+            -- esx identity integration
+            esxidentity = false,
+            identitylimits = {
+                namemax = SkinCreatorConfig.MaxNameLength,
+                heightmin = SkinCreatorConfig.MinHeight,
+                heightmax = SkinCreatorConfig.MaxHeight,
+                yearmin = SkinCreatorConfig.LowestYear,
+                yearmax = SkinCreatorConfig.HighestYear
+            }
         })
-    end)
 
-RegisterNetEvent('easyCore:client:skincreator')
-AddEventHandler('easyCore:client:skincreator', function(characterid, boolean)
-    cid = characterid
-    isSkinCreatorOpened = boolean
+        initialized = true
+        Citizen.Wait(100)
+    end
+end)
+
+RegisterNUICallback('setCameraView', function(data, cb)
+    Camera.SetView(data['view'])
+end)
+
+RegisterNUICallback('updateCameraRotation', function(data, cb)
+    Camera.mouseX = tonumber(data['x'])
+    Camera.mouseY = tonumber(data['y'])
+    Camera.updateRot = true
+end)
+
+RegisterNUICallback('updateCameraZoom', function(data, cb)
+    Camera.radius = Camera.radius + (tonumber(data['zoom']))
+    Camera.updateZoom = true
+end)
+
+RegisterNUICallback('playSound', function(data, cb)
+    local sound = data['sound']
+
+    if sound == 'tabchange' then
+        PlaySoundFrontend(-1, 'Continue_Appears', 'DLC_HEIST_PLANNING_BOARD_SOUNDS', 1)
+    elseif sound == 'mouseover' then
+        PlaySoundFrontend(-1, 'Faster_Click', 'RESPAWN_ONLINE_SOUNDSET', 1)
+    elseif sound == 'panelbuttonclick' then
+        PlaySoundFrontend(-1, 'Reset_Prop_Position', 'DLC_Dmod_Prop_Editor_Sounds', 0)
+    elseif sound == 'optionchange' then
+        PlaySoundFrontend(-1, 'HACKING_MOVE_CURSOR', 0, 1)
+    end
+end)
+
+RegisterNUICallback('setCurrentTab', function(data, cb)
+    currentTab = data['tab']
+end)
+
+RegisterNUICallback('close', function(data, cb)
+    TriggerEvent('cui_character:close', data['save'])
+end)
+
+RegisterNUICallback('updateMakeupType', function(data, cb)
+    --[[
+            NOTE:   This is a pure control variable that does not call any natives.
+                    It only modifies which options are going to be visible in the ui.
+                    Since face paint replaces blusher and eye makeup,
+                    we need to save in the database which type the player selected:
+                    0 - 'None',
+                    1 - 'Eye Makeup',
+                    2 - 'Face Paint'
+    ]] --
+    local type = tonumber(data['type'])
+    currentChar['makeup_type'] = type
+
+    SendNUIMessage({
+        action = 'refreshMakeup',
+        character = currentChar
+    })
+end)
+
+RegisterNUICallback('syncFacepaintOpacity', function(data, cb)
+    local prevtype = data['prevtype']
+    local currenttype = data['currenttype']
+    local prevopacity = prevtype .. '_2'
+    local currentopacity = currenttype .. '_2'
+    currentChar[currentopacity] = currentChar[prevopacity]
+end)
+
+RegisterNUICallback('clearMakeup', function(data, cb)
+    if data['clearopacity'] then
+        currentChar['makeup_2'] = 100
+        if data['clearblusher'] then
+            currentChar['blush_2'] = 100
+        end
+    end
+
+    currentChar['makeup_1'] = 255
+    currentChar['makeup_3'] = 255
+    currentChar['makeup_4'] = 255
+
+    SetPedHeadOverlay(previewPed, 4, currentChar.makeup_1, currentChar.makeup_2 / 100 + 0.0) -- Eye Makeup
+    SetPedHeadOverlayColor(previewPed, 4, 0, currentChar.makeup_3, currentChar.makeup_4) -- Eye Makeup Color
+
+    if data['clearblusher'] then
+        currentChar['blush_1'] = 255
+        currentChar['blush_3'] = 0
+        SetPedHeadOverlay(previewPed, 5, currentChar.blush_1, currentChar.blush_2 / 100 + 0.0) -- Blusher
+        SetPedHeadOverlayColor(previewPed, 5, 2, currentChar.blush_3, 255) -- Blusher Color
+    end
+end)
+
+RegisterNUICallback('updateGender', function(data, cb)
+    currentChar.sex = tonumber(data['value'])
+    local modelHash = nil
+    local isMale = true
+    if currentChar.sex == 0 then
+        modelHash = GetHashKey('mp_m_freemode_01')
+    elseif currentChar.sex == 1 then
+        isMale = false
+        modelHash = GetHashKey('mp_f_freemode_01')
+    else
+        return
+    end
+
+    -- NOTE: There seems to be no native for model change that preserves existing coords
+    local previewCoords = GetEntityCoords(previewPed)
+    DeleteEntity(previewPed)
+    previewPed = CreatePed(4, modelHash, 397.92, -1004.4, -99.0, false, true)
+    local defaultChar = GetDefaultCharacter(isMale)
+    ApplySkinToPed(previewPed, defaultChar)
+    for k, v in pairs(defaultChar) do
+        currentChar[k] = v
+    end
+
+    ResetAllTabs()
+
+    local playerCoords = GetEntityCoords(PlayerPedId())
+    for height = playerCoords.z, 1000 do
+        SetPedCoordsKeepVehicle(previewPed, previewCoords.x, previewCoords.y, height + 0.0)
+        local foundGround, zPos = GetGroundZFor_3dCoord(previewCoords.x, previewCoords.y, height + 0.0)
+        if foundGround then
+            SetPedCoordsKeepVehicle(previewPed, previewCoords.x, previewCoords.y, zPos)
+            break
+        end
+    end
+
+    PlayIdleAnimation(previewPed)
+end)
+
+RegisterNUICallback('updateHeadBlend', function(data, cb)
+    local key = data['key']
+    local value = tonumber(data['value'])
+    currentChar[key] = value
+
+    local weightFace = currentChar.face_md_weight / 100 + 0.0
+    local weightSkin = currentChar.skin_md_weight / 100 + 0.0
+
+    SetPedHeadBlendData(previewPed, currentChar.mom, currentChar.dad, 0, currentChar.mom, currentChar.dad, 0,
+        weightFace, weightSkin, 0.0, false)
+end)
+
+RegisterNUICallback('updateFaceFeature', function(data, cb)
+    local key = data['key']
+    local value = tonumber(data['value'])
+    local index = tonumber(data['index'])
+    currentChar[key] = value
+
+    SetPedFaceFeature(previewPed, index, (currentChar[key] / 100) + 0.0)
+end)
+
+RegisterNUICallback('updateEyeColor', function(data, cb)
+    local value = tonumber(data['value'])
+    currentChar['eye_color'] = value
+
+    SetPedEyeColor(previewPed, currentChar.eye_color)
+end)
+
+RegisterNUICallback('updateHairColor', function(data, cb)
+    local key = data['key']
+    local value = tonumber(data['value'])
+    local highlight = data['highlight']
+    currentChar[key] = value
+
+    if highlight then
+        SetPedHairColor(previewPed, currentChar['hair_color_1'], currentChar[key])
+    else
+        SetPedHairColor(previewPed, currentChar[key], currentChar['hair_color_2'])
+    end
+end)
+
+RegisterNUICallback('updateHeadOverlay', function(data, cb)
+    local key = data['key']
+    local keyPaired = data['keyPaired']
+    local value = tonumber(data['value'])
+    local index = tonumber(data['index'])
+    local isOpacity = (data['isOpacity'])
+    currentChar[key] = value
+
+    if isOpacity then
+        SetPedHeadOverlay(previewPed, index, currentChar[keyPaired], currentChar[key] / 100 + 0.0)
+    else
+        SetPedHeadOverlay(previewPed, index, currentChar[key], currentChar[keyPaired] / 100 + 0.0)
+    end
+end)
+
+RegisterNUICallback('updateHeadOverlayExtra', function(data, cb)
+    local key = data['key']
+    local keyPaired = data['keyPaired']
+    local value = tonumber(data['value'])
+    local index = tonumber(data['index'])
+    local keyExtra = data['keyExtra']
+    local valueExtra = tonumber(data['valueExtra'])
+    local indexExtra = tonumber(data['indexExtra'])
+    local isOpacity = (data['isOpacity'])
+
+    currentChar[key] = value
+
+    if isOpacity then
+        currentChar[keyExtra] = value
+        SetPedHeadOverlay(previewPed, index, currentChar[keyPaired], currentChar[key] / 100 + 0.0)
+        SetPedHeadOverlay(previewPed, indexExtra, valueExtra, currentChar[key] / 100 + 0.0)
+    else
+        currentChar[keyExtra] = valueExtra
+        SetPedHeadOverlay(previewPed, index, currentChar[key], currentChar[keyPaired] / 100 + 0.0)
+        SetPedHeadOverlay(previewPed, indexExtra, currentChar[keyExtra], currentChar[keyPaired] / 100 + 0.0)
+    end
+end)
+
+RegisterNUICallback('updateOverlayColor', function(data, cb)
+    local key = data['key']
+    local value = tonumber(data['value'])
+    local index = tonumber(data['index'])
+    local colortype = tonumber(data['colortype'])
+    currentChar[key] = value
+
+    SetPedHeadOverlayColor(previewPed, index, colortype, currentChar[key])
+end)
+
+RegisterNUICallback('updateComponent', function(data, cb)
+    local drawableKey = data['drawable']
+    local drawableValue = tonumber(data['dvalue'])
+    local textureKey = data['texture']
+    local textureValue = tonumber(data['tvalue'])
+    local index = tonumber(data['index'])
+    currentChar[drawableKey] = drawableValue
+    currentChar[textureKey] = textureValue
+
+    SetPedComponentVariation(previewPed, index, currentChar[drawableKey], currentChar[textureKey], 2)
+end)
+
+RegisterNUICallback('updateApparelComponent', function(data, cb)
+    local drawableKey = data['drwkey']
+    local textureKey = data['texkey']
+    local component = tonumber(data['cmpid'])
+    currentChar[drawableKey] = tonumber(data['drwval'])
+    currentChar[textureKey] = tonumber(data['texval'])
+
+    SetPedComponentVariation(previewPed, component, currentChar[drawableKey], currentChar[textureKey], 2)
+
+    -- Some clothes have 'forced components' that change torso and other parts.
+    -- adapted from: https://gist.github.com/root-cause/3b80234367b0c856d60bf5cb4b826f86
+    local hash = GetHashNameForComponent(previewPed, component, currentChar[drawableKey], currentChar[textureKey])
+    -- print('main component hash ' .. hash)
+    local fcDrawable, fcTexture, fcType = -1, -1, -1
+    local fcCount = GetShopPedApparelForcedComponentCount(hash) - 1
+    -- print('found ' .. fcCount + 1 .. ' forced components')
+    for fcId = 0, fcCount do
+        local fcNameHash, fcEnumVal, f5, f7, f8 = -1, -1, -1, -1, -1
+        fcNameHash, fcEnumVal, fcType = GetForcedComponent(hash, fcId)
+        -- print('forced component [' .. fcId .. ']: nameHash: ' .. fcNameHash .. ', enumVal: ' .. fcEnumVal .. ', type: ' .. fcType--[[.. ', field5: ' .. f5 .. ', field7: ' .. f7 .. ', field8: ' .. f8 --]])
+
+        -- only set torsos, using other types here seems to glitch out
+        if fcType == 3 then
+            if (fcNameHash == 0) or (fcNameHash == GetHashKey('0')) then
+                fcDrawable = fcEnumVal
+                fcTexture = 0
+            else
+                fcType, fcDrawable, fcTexture = GetComponentDataFromHash(fcNameHash)
+            end
+
+            -- Apply component to ped, save it in current character data
+            if IsPedComponentVariationValid(previewPed, fcType, fcDrawable, fcTexture) then
+                currentChar['arms'] = fcDrawable
+                currentChar['arms_2'] = fcTexture
+                SetPedComponentVariation(previewPed, fcType, fcDrawable, fcTexture, 2)
+            end
+        end
+    end
+
+    -- Forced components do not pick proper torso for 'None' variant, need manual correction
+    if GetEntityModel(previewPed) == GetHashKey('mp_f_freemode_01') then
+        if (GetPedDrawableVariation(previewPed, 11) == 15) and (GetPedTextureVariation(previewPed, 11) == 16) then
+            currentChar['arms'] = 15
+            currentChar['arms_2'] = 0
+            SetPedComponentVariation(previewPed, 3, 15, 0, 2);
+        end
+    elseif GetEntityModel(previewPed) == GetHashKey('mp_m_freemode_01') then
+        if (GetPedDrawableVariation(previewPed, 11) == 15) and (GetPedTextureVariation(previewPed, 11) == 0) then
+            currentChar['arms'] = 15
+            currentChar['arms_2'] = 0
+            SetPedComponentVariation(previewPed, 3, 15, 0, 2);
+        end
+    end
+end)
+
+RegisterNUICallback('updateApparelProp', function(data, cb)
+    local drawableKey = data['drwkey']
+    local textureKey = data['texkey']
+    local prop = tonumber(data['propid'])
+    currentChar[drawableKey] = tonumber(data['drwval'])
+    currentChar[textureKey] = tonumber(data['texval'])
+
+    if currentChar[drawableKey] == -1 then
+        ClearPedProp(previewPed, prop)
+    else
+        SetPedPropIndex(previewPed, prop, currentChar[drawableKey], currentChar[textureKey], false)
+    end
+end)
+
+function GetHairColors()
+    local result = {}
+    local i = 0
+
+    if SkinCreatorConfig.UseNaturalHairColors then
+        for i = 0, 18 do
+            table.insert(result, i)
+        end
+        table.insert(result, 24)
+        table.insert(result, 26)
+        table.insert(result, 27)
+        table.insert(result, 28)
+        for i = 55, 60 do
+            table.insert(result, i)
+        end
+    else
+        for i = 0, 60 do
+            table.insert(result, i)
+        end
+    end
+
+    return result
+end
+
+function GetLipstickColors()
+    local result = {}
+    local i = 0
+
+    for i = 0, 31 do
+        table.insert(result, i)
+    end
+    table.insert(result, 48)
+    table.insert(result, 49)
+    table.insert(result, 55)
+    table.insert(result, 56)
+    table.insert(result, 62)
+    table.insert(result, 63)
+
+    return result
+end
+
+function GetFacepaintColors()
+    local result = {}
+    local i = 0
+
+    for i = 0, 63 do
+        table.insert(result, i)
+    end
+
+    return result
+end
+
+function GetBlusherColors()
+    local result = {}
+    local i = 0
+
+    for i = 0, 22 do
+        table.insert(result, i)
+    end
+    table.insert(result, 25)
+    table.insert(result, 26)
+    table.insert(result, 51)
+    table.insert(result, 60)
+
+    return result
+end
+
+function RGBToHexCode(r, g, b)
+    local result = string.format('#%x', ((r << 16) | (g << 8) | b))
+    return result
+end
+
+function GetColorData(indexes, isHair)
+    local result = {}
+    local GetRgbColor = nil
+
+    if isHair then
+        GetRgbColor = function(index)
+            return GetPedHairRgbColor(index)
+        end
+    else
+        GetRgbColor = function(index)
+            return GetPedMakeupRgbColor(index)
+        end
+    end
+
+    for i, index in ipairs(indexes) do
+        local r, g, b = GetRgbColor(index)
+        local hex = RGBToHexCode(r, g, b)
+        table.insert(result, {
+            index = index,
+            hex = hex
+        })
+    end
+
+    return result
+end
+
+function GetComponentDataFromHash(hash)
+    local blob = string.rep('\0\0\0\0\0\0\0\0', 9 + 16)
+    if not Citizen.InvokeNative(0x74C0E2A57EC66760, hash, blob) then
+        return nil
+    end
+
+    -- adapted from: https://gist.github.com/root-cause/3b80234367b0c856d60bf5cb4b826f86
+    local lockHash = string.unpack('<i4', blob, 1)
+    local hash = string.unpack('<i4', blob, 9)
+    local locate = string.unpack('<i4', blob, 17)
+    local drawable = string.unpack('<i4', blob, 25)
+    local texture = string.unpack('<i4', blob, 33)
+    local field5 = string.unpack('<i4', blob, 41)
+    local component = string.unpack('<i4', blob, 49)
+    local field7 = string.unpack('<i4', blob, 57)
+    local field8 = string.unpack('<i4', blob, 65)
+    local gxt = string.unpack('c64', blob, 73)
+
+    return component, drawable, texture, gxt, field5, field7, field8
+end
+
+function GetPropDataFromHash(hash)
+    local blob = string.rep('\0\0\0\0\0\0\0\0', 9 + 16)
+    if not Citizen.InvokeNative(0x5D5CAFF661DDF6FC, hash, blob) then
+        return nil
+    end
+
+    -- adapted from: https://gist.github.com/root-cause/3b80234367b0c856d60bf5cb4b826f86
+    local lockHash = string.unpack('<i4', blob, 1)
+    local hash = string.unpack('<i4', blob, 9)
+    local locate = string.unpack('<i4', blob, 17)
+    local drawable = string.unpack('<i4', blob, 25)
+    local texture = string.unpack('<i4', blob, 33)
+    local field5 = string.unpack('<i4', blob, 41)
+    local prop = string.unpack('<i4', blob, 49)
+    local field7 = string.unpack('<i4', blob, 57)
+    local field8 = string.unpack('<i4', blob, 65)
+    local gxt = string.unpack('c64', blob, 73)
+
+    return prop, drawable, texture, gxt, field5, field7, field8
+end
+
+function GetComponentsData(id)
+    local result = {}
+
+    local componentBlacklist = nil
+
+    if blacklist ~= nil then
+        if GetEntityModel(previewPed) == GetHashKey('mp_m_freemode_01') then
+            componentBlacklist = blacklist.components.male
+        elseif GetEntityModel(previewPed) == GetHashKey('mp_f_freemode_01') then
+            componentBlacklist = blacklist.components.female
+        end
+    end
+
+    local drawableCount = GetNumberOfPedDrawableVariations(previewPed, id) - 1
+
+    for drawable = 0, drawableCount do
+        local textureCount = GetNumberOfPedTextureVariations(previewPed, id, drawable) - 1
+
+        for texture = 0, textureCount do
+            local hash = GetHashNameForComponent(previewPed, id, drawable, texture)
+
+            if hash ~= 0 then
+                local component, drawable, texture, gxt = GetComponentDataFromHash(hash)
+                -- only named components
+                if gxt ~= '' then
+                    label = GetLabelText(gxt)
+                    if label ~= 'NULL' then
+                        local blacklisted = false
+
+                        if componentBlacklist ~= nil then
+                            if componentBlacklist[component] ~= nil then
+                                if componentBlacklist[component][drawable] ~= nil then
+                                    if componentBlacklist[component][drawable][texture] ~= nil then
+                                        blacklisted = true
+                                    end
+                                end
+                            end
+                        end
+
+                        if not blacklisted then
+                            table.insert(result, {
+                                name = label,
+                                component = component,
+                                drawable = drawable,
+                                texture = texture
+                            })
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return result
+end
+
+function GetPropsData(id)
+    local result = {}
+
+    local propBlacklist = nil
+
+    if blacklist ~= nil then
+        if GetEntityModel(previewPed) == GetHashKey('mp_m_freemode_01') then
+            propBlacklist = blacklist.props.male
+        elseif GetEntityModel(previewPed) == GetHashKey('mp_f_freemode_01') then
+            propBlacklist = blacklist.props.female
+        end
+    end
+
+    local drawableCount = GetNumberOfPedPropDrawableVariations(previewPed, id) - 1
+
+    for drawable = 0, drawableCount do
+        local textureCount = GetNumberOfPedPropTextureVariations(previewPed, id, drawable) - 1
+
+        for texture = 0, textureCount do
+            local hash = GetHashNameForProp(previewPed, id, drawable, texture)
+
+            if hash ~= 0 then
+                local prop, drawable, texture, gxt = GetPropDataFromHash(hash)
+
+                -- only named props
+                if gxt ~= '' then
+                    label = GetLabelText(gxt)
+                    if label ~= 'NULL' then
+                        local blacklisted = false
+
+                        if propBlacklist ~= nil then
+                            if propBlacklist[prop] ~= nil then
+                                if propBlacklist[prop][drawable] ~= nil then
+                                    if propBlacklist[prop][drawable][texture] ~= nil then
+                                        blacklisted = true
+                                    end
+                                end
+                            end
+                        end
+
+                        if not blacklisted then
+                            table.insert(result, {
+                                name = label,
+                                prop = prop,
+                                drawable = drawable,
+                                texture = texture
+                            })
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return result
+end
+
+function GetClothesData()
+    local result = {
+        topsover = {},
+        topsunder = {},
+        pants = {},
+        shoes = {},
+        bags = {},
+        masks = {},
+        neckarms = {},
+        hats = {},
+        ears = {},
+        glasses = {},
+        lefthands = {},
+        righthands = {}
+    }
+
+    result.topsover = GetComponentsData(11)
+    result.topsunder = GetComponentsData(8)
+    result.pants = GetComponentsData(4)
+    result.shoes = GetComponentsData(6)
+    -- result.bags = GetComponentsData(5)   -- there seems to be no named components in this category
+    result.masks = GetComponentsData(1)
+    result.neckarms = GetComponentsData(7) -- chains/ties/suspenders/bangles
+
+    result.hats = GetPropsData(0)
+    result.ears = GetPropsData(2)
+    result.glasses = GetPropsData(1)
+    result.lefthands = GetPropsData(6)
+    result.righthands = GetPropsData(7)
+    --[[
+            unused components:   
+            face (0), torso/arms (3), parachute/bag (5), bulletproof vest (9), badges (10)
+            unused props:
+            mouth (3), left hand (4), righ thand (5), left wrist (6), right wrist (7), hip (8), 
+            left foot(9), right foot (10)
+    ]]
+    return result
+end
+
+function GetDefaultCharacter(isMale)
+    local result = {
+        sex = 1,
+        mom = 21,
+        dad = 0,
+        face_md_weight = 50,
+        skin_md_weight = 50,
+        nose_1 = 0,
+        nose_2 = 0,
+        nose_3 = 0,
+        nose_4 = 0,
+        nose_5 = 0,
+        nose_6 = 0,
+        cheeks_1 = 0,
+        cheeks_2 = 0,
+        cheeks_3 = 0,
+        lip_thickness = 0,
+        jaw_1 = 0,
+        jaw_2 = 0,
+        chin_1 = 0,
+        chin_2 = 0,
+        chin_3 = 0,
+        chin_4 = 0,
+        neck_thickness = 0,
+        hair_1 = 0,
+        hair_2 = 0,
+        hair_color_1 = 0,
+        hair_color_2 = 0,
+        tshirt_1 = 0,
+        tshirt_2 = 0,
+        torso_1 = 0,
+        torso_2 = 0,
+        decals_1 = 0,
+        decals_2 = 0,
+        arms = 15,
+        arms_2 = 0,
+        pants_1 = 0,
+        pants_2 = 0,
+        shoes_1 = 0,
+        shoes_2 = 0,
+        mask_1 = 0,
+        mask_2 = 0,
+        bproof_1 = 0,
+        bproof_2 = 0,
+        neckarm_1 = 0,
+        neckarm_2 = 0,
+        helmet_1 = -1,
+        helmet_2 = 0,
+        glasses_1 = -1,
+        glasses_2 = 0,
+        lefthand_1 = -1,
+        lefthand_2 = 0,
+        righthand_1 = -1,
+        righthand_2 = 0,
+        bags_1 = 0,
+        bags_2 = 0,
+        eye_color = 0,
+        eye_squint = 0,
+        eyebrows_2 = 100,
+        eyebrows_1 = 0,
+        eyebrows_3 = 0,
+        eyebrows_4 = 0,
+        eyebrows_5 = 0,
+        eyebrows_6 = 0,
+        makeup_type = 0,
+        makeup_1 = 255,
+        makeup_2 = 100,
+        makeup_3 = 255,
+        makeup_4 = 255,
+        lipstick_1 = 255,
+        lipstick_2 = 100,
+        lipstick_3 = 0,
+        lipstick_4 = 0,
+        ears_1 = -1,
+        ears_2 = 0,
+        chest_1 = 255,
+        chest_2 = 100,
+        chest_3 = 0,
+        chest_4 = 0,
+        bodyb_1 = 255,
+        bodyb_2 = 100,
+        bodyb_3 = 255,
+        bodyb_4 = 100,
+        age_1 = 255,
+        age_2 = 100,
+        blemishes_1 = 255,
+        blemishes_2 = 100,
+        blush_1 = 255,
+        blush_2 = 100,
+        blush_3 = 0,
+        complexion_1 = 255,
+        complexion_2 = 100,
+        sun_1 = 255,
+        sun_2 = 100,
+        moles_1 = 255,
+        moles_2 = 100,
+        beard_1 = 255,
+        beard_2 = 100,
+        beard_3 = 0,
+        beard_4 = 0
+    }
+
+    if isMale then
+        result['sex'] = 0
+        result['torso_1'] = 15
+        result['tshirt_1'] = 15
+        result['pants_1'] = 61
+        result['shoes_1'] = 34
+    else
+        result['torso_1'] = 18
+        result['tshirt_1'] = 2
+        result['pants_1'] = 19
+        result['shoes_1'] = 35
+    end
+
+    return result
+end
+
+function LoadModel(hash)
+    isModelLoaded = false
+    local playerPed = PlayerPedId()
+    SetEntityInvincible(playerPed, true)
+
+    if IsModelInCdimage(hash) and IsModelValid(hash) then
+        RequestModel(hash)
+        while not HasModelLoaded(hash) do
+            Citizen.Wait(0)
+        end
+        SetPlayerModel(PlayerId(), hash)
+        FreezePedCameraRotation(playerPed, true)
+    end
+    SetEntityInvincible(playerPed, false)
+
+    isModelLoaded = true
+    if not SkinCreatorConfig.StandAlone then
+        TriggerEvent('skinchanger:modelLoaded')
+    end
+end
+
+function PlayIdleAnimation(ped)
+    local animDict = nil
+
+    if GetEntityModel(ped) == GetHashKey('mp_m_freemode_01') then
+        animDict = 'anim@heists@heist_corona@team_idles@male_c'
+    elseif GetEntityModel(ped) == GetHashKey('mp_f_freemode_01') then
+        animDict = 'anim@heists@heist_corona@team_idles@female_a'
+    else
+        return
+    end
+
+    while not HasAnimDictLoaded(animDict) do
+        RequestAnimDict(animDict)
+        Wait(100)
+    end
+
+    ClearPedTasksImmediately(ped)
+    TaskPlayAnim(ped, animDict, 'idle', 1.0, 1.0, -1, 1, 1, 0, 0, 0)
+end
+
+function ClearAllAnimations(ped)
+    ClearPedTasksImmediately(ped)
+
+    if HasAnimDictLoaded('anim@heists@heist_corona@team_idles@female_a') then
+        RemoveAnimDict('anim@heists@heist_corona@team_idles@female_a')
+    end
+
+    if HasAnimDictLoaded('anim@heists@heist_corona@team_idles@male_c') then
+        RemoveAnimDict('anim@heists@heist_corona@team_idles@male_c')
+    end
+end
+
+-- Loading character data
+function ApplySkinToPed(ped, skin)
+    -- Face Blend
+    local weightFace = skin.face_md_weight / 100 + 0.0
+    local weightSkin = skin.skin_md_weight / 100 + 0.0
+    SetPedHeadBlendData(ped, skin.mom, skin.dad, 0, skin.mom, skin.dad, 0, weightFace, weightSkin, 0.0, false)
+
+    -- Facial Features
+    SetPedFaceFeature(ped, 0, (skin.nose_1 / 100) + 0.0) -- Nose Width
+    SetPedFaceFeature(ped, 1, (skin.nose_2 / 100) + 0.0) -- Nose Peak Height
+    SetPedFaceFeature(ped, 2, (skin.nose_3 / 100) + 0.0) -- Nose Peak Length
+    SetPedFaceFeature(ped, 3, (skin.nose_4 / 100) + 0.0) -- Nose Bone Height
+    SetPedFaceFeature(ped, 4, (skin.nose_5 / 100) + 0.0) -- Nose Peak Lowering
+    SetPedFaceFeature(ped, 5, (skin.nose_6 / 100) + 0.0) -- Nose Bone Twist
+    SetPedFaceFeature(ped, 6, (skin.eyebrows_5 / 100) + 0.0) -- Eyebrow height
+    SetPedFaceFeature(ped, 7, (skin.eyebrows_6 / 100) + 0.0) -- Eyebrow depth
+    SetPedFaceFeature(ped, 8, (skin.cheeks_1 / 100) + 0.0) -- Cheekbones Height
+    SetPedFaceFeature(ped, 9, (skin.cheeks_2 / 100) + 0.0) -- Cheekbones Width
+    SetPedFaceFeature(ped, 10, (skin.cheeks_3 / 100) + 0.0) -- Cheeks Width
+    SetPedFaceFeature(ped, 11, (skin.eye_squint / 100) + 0.0) -- Eyes squint
+    SetPedFaceFeature(ped, 12, (skin.lip_thickness / 100) + 0.0) -- Lip Fullness
+    SetPedFaceFeature(ped, 13, (skin.jaw_1 / 100) + 0.0) -- Jaw Bone Width
+    SetPedFaceFeature(ped, 14, (skin.jaw_2 / 100) + 0.0) -- Jaw Bone Length
+    SetPedFaceFeature(ped, 15, (skin.chin_1 / 100) + 0.0) -- Chin Height
+    SetPedFaceFeature(ped, 16, (skin.chin_2 / 100) + 0.0) -- Chin Length
+    SetPedFaceFeature(ped, 17, (skin.chin_3 / 100) + 0.0) -- Chin Width
+    SetPedFaceFeature(ped, 18, (skin.chin_4 / 100) + 0.0) -- Chin Hole Size
+    SetPedFaceFeature(ped, 19, (skin.neck_thickness / 100) + 0.0) -- Neck Thickness
+
+    -- Appearance
+    SetPedComponentVariation(ped, 2, skin.hair_1, skin.hair_2, 2) -- Hair Style
+    SetPedHairColor(ped, skin.hair_color_1, skin.hair_color_2) -- Hair Color
+    SetPedHeadOverlay(ped, 2, skin.eyebrows_1, skin.eyebrows_2 / 100 + 0.0) -- Eyebrow Style + Opacity
+    SetPedHeadOverlayColor(ped, 2, 1, skin.eyebrows_3, skin.eyebrows_4) -- Eyebrow Color
+    SetPedHeadOverlay(ped, 1, skin.beard_1, skin.beard_2 / 100 + 0.0) -- Beard Style + Opacity
+    SetPedHeadOverlayColor(ped, 1, 1, skin.beard_3, skin.beard_4) -- Beard Color
+
+    SetPedHeadOverlay(ped, 0, skin.blemishes_1, skin.blemishes_2 / 100 + 0.0) -- Skin blemishes + Opacity
+    SetPedHeadOverlay(ped, 12, skin.bodyb_3, skin.bodyb_4 / 100 + 0.0) -- Skin blemishes body effect + Opacity
+
+    SetPedHeadOverlay(ped, 11, skin.bodyb_1, skin.bodyb_2 / 100 + 0.0) -- Body Blemishes + Opacity
+
+    SetPedHeadOverlay(ped, 3, skin.age_1, skin.age_2 / 100 + 0.0) -- Age + opacity
+    SetPedHeadOverlay(ped, 6, skin.complexion_1, skin.complexion_2 / 100 + 0.0) -- Complexion + Opacity
+    SetPedHeadOverlay(ped, 9, skin.moles_1, skin.moles_2 / 100 + 0.0) -- Moles/Freckles + Opacity
+    SetPedHeadOverlay(ped, 7, skin.sun_1, skin.sun_2 / 100 + 0.0) -- Sun Damage + Opacity
+    SetPedEyeColor(ped, skin.eye_color) -- Eyes Color
+    SetPedHeadOverlay(ped, 4, skin.makeup_1, skin.makeup_2 / 100 + 0.0) -- Makeup + Opacity
+    SetPedHeadOverlayColor(ped, 4, 0, skin.makeup_3, skin.makeup_4) -- Makeup Color
+    SetPedHeadOverlay(ped, 5, skin.blush_1, skin.blush_2 / 100 + 0.0) -- Blush + Opacity
+    SetPedHeadOverlayColor(ped, 5, 2, skin.blush_3) -- Blush Color
+    SetPedHeadOverlay(ped, 8, skin.lipstick_1, skin.lipstick_2 / 100 + 0.0) -- Lipstick + Opacity
+    SetPedHeadOverlayColor(ped, 8, 2, skin.lipstick_3, skin.lipstick_4) -- Lipstick Color
+    SetPedHeadOverlay(ped, 10, skin.chest_1, skin.chest_2 / 100 + 0.0) -- Chest Hair + Opacity
+    SetPedHeadOverlayColor(ped, 10, 1, skin.chest_3, skin.chest_4) -- Chest Hair Color
+
+    -- Clothing and Accessories
+    SetPedComponentVariation(ped, 8, skin.tshirt_1, skin.tshirt_2, 2) -- Undershirts
+    SetPedComponentVariation(ped, 11, skin.torso_1, skin.torso_2, 2) -- Jackets
+    SetPedComponentVariation(ped, 3, skin.arms, skin.arms_2, 2) -- Torsos
+    SetPedComponentVariation(ped, 10, skin.decals_1, skin.decals_2, 2) -- Decals
+    SetPedComponentVariation(ped, 4, skin.pants_1, skin.pants_2, 2) -- Legs
+    SetPedComponentVariation(ped, 6, skin.shoes_1, skin.shoes_2, 2) -- Shoes
+    SetPedComponentVariation(ped, 1, skin.mask_1, skin.mask_2, 2) -- Masks
+    SetPedComponentVariation(ped, 9, skin.bproof_1, skin.bproof_2, 2) -- Vests
+    SetPedComponentVariation(ped, 7, skin.neckarm_1, skin.neckarm_2, 2) -- Necklaces/Chains/Ties/Suspenders
+    SetPedComponentVariation(ped, 5, skin.bags_1, skin.bags_2, 2) -- Bags
+
+    if skin.helmet_1 == -1 then
+        ClearPedProp(ped, 0)
+    else
+        SetPedPropIndex(ped, 0, skin.helmet_1, skin.helmet_2, 2) -- Hats
+    end
+
+    if skin.glasses_1 == -1 then
+        ClearPedProp(ped, 1)
+    else
+        SetPedPropIndex(ped, 1, skin.glasses_1, skin.glasses_2, 2) -- Glasses
+    end
+
+    if skin.lefthand_1 == -1 then
+        ClearPedProp(ped, 6)
+    else
+        SetPedPropIndex(ped, 6, skin.lefthand_1, skin.lefthand_2, 2) -- Left Hand Accessory
+    end
+
+    if skin.righthand_1 == -1 then
+        ClearPedProp(ped, 7)
+    else
+        SetPedPropIndex(ped, 7, skin.righthand_1, skin.righthand_2, 2) -- Right Hand Accessory
+    end
+
+    if skin.ears_1 == -1 then
+        ClearPedProp(ped, 2)
+    else
+        SetPedPropIndex(ped, 2, skin.ears_1, skin.ears_2, 2) -- Ear Accessory
+    end
+end
+
+function LoadCharacter(data, callback)
+    for k, v in pairs(data) do
+        currentChar[k] = v
+    end
+
+    local modelHash = nil
+    if data.sex == 0 then
+        modelHash = GetHashKey('mp_m_freemode_01')
+    else
+        modelHash = GetHashKey('mp_f_freemode_01')
+    end
+
+    LoadModel(modelHash)
+
+    local playerPed = PlayerPedId()
+    ApplySkinToPed(playerPed, data)
+
+    if callback ~= nil then
+        callback()
+    end
+end
+
+-- Map Locations
+local closestCoords = nil
+local closestType = ''
+local distToClosest = 1000.0
+local inMarkerRange = false
+
+function DisplayTooltip(suffix)
+    SetTextComponentFormat('STRING')
+    AddTextComponentString('Press ~INPUT_PICKUP~ to ' .. suffix)
+    DisplayHelpTextFromStringLabel(0, 0, 1, -1)
+end
+
+function UpdateClosestLocation(locations, type)
+    local pedPosition = GetEntityCoords(PlayerPedId())
+    for i = 1, #locations do
+        local loc = locations[i]
+        local distance = GetDistanceBetweenCoords(pedPosition.x, pedPosition.y, pedPosition.z, loc[1], loc[2], loc[3],
+            false)
+        if (distToClosest == nil or closestCoords == nil) or (distance < distToClosest) or (closestCoords == loc) then
+            distToClosest = distance
+            closestType = type
+            closestCoords = vector3(loc[1], loc[2], loc[3])
+        end
+
+        if (distToClosest < 20.0) and (distToClosest > 1.0) then
+            inMarkerRange = true
+        else
+            inMarkerRange = false
+        end
+    end
+end
+
+Citizen.CreateThread(function()
+    while true do
+        if SkinCreatorConfig.EnableClothingShops then
+            UpdateClosestLocation(SkinCreatorConfig.ClothingShops, 'clothing')
+        end
+
+        if SkinCreatorConfig.EnableBarberShops then
+            UpdateClosestLocation(SkinCreatorConfig.BarberShops, 'barber')
+        end
+
+        if SkinCreatorConfig.EnablePlasticSurgeryUnits then
+            UpdateClosestLocation(SkinCreatorConfig.PlasticSurgeryUnits, 'surgery')
+        end
+
+        if SkinCreatorConfig.EnableNewIdentityProviders then
+            UpdateClosestLocation(SkinCreatorConfig.NewIdentityProviders, 'identity')
+        end
+        Citizen.Wait(500)
+    end
 end)
 
 Citizen.CreateThread(function()
     while true do
-        if isSkinCreatorOpened == true then
-            SkinCreator(true)
-            SetEntityHeading(GetPlayerPed(-1), heading)
-        else
-            SkinCreator(false)
+        --  TODO: make nearby players invisible while using these,
+        --  use https://runtime.fivem.net/doc/natives/?_0xE135A9FF3F5D05D8
+        --  TODO: possibly charge money for use
+
+        if inMarkerRange then
+            DrawMarker(20, closestCoords.x, closestCoords.y, closestCoords.z + 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+                1.0, 1.0, 45, 110, 185, 128, true, -- move up and down
+                false, 2, true, -- rotate
+                nil, nil, false)
+        end
+
+        if distToClosest < 1.0 and (not isVisible) then
+            if isOnDuty then
+                SetTextComponentFormat('STRING')
+                AddTextComponentString('You cannot access this while ~r~on duty~s~.')
+                DisplayHelpTextFromStringLabel(0, 0, 1, -1)
+            else
+                if closestType == 'clothing' then
+                    DisplayTooltip('use clothing store.')
+                    if IsControlJustPressed(1, 38) then
+                        TriggerEvent('cui_character:open', {'apparel'})
+                    end
+                elseif closestType == 'barber' then
+                    DisplayTooltip('use barber shop.')
+                    if IsControlJustPressed(1, 38) then
+                        TriggerEvent('cui_character:open', {'style'})
+                    end
+                elseif closestType == 'surgery' then
+                    DisplayTooltip('use platic surgery unit.')
+                    if IsControlJustPressed(1, 38) then
+                        TriggerEvent('cui_character:open', {'features'})
+                    end
+                elseif closestType == 'identity' then
+                    DisplayTooltip('change your identity.')
+                    if IsControlJustPressed(1, 38) then
+                        TriggerEvent('cui_character:open', {'identity'})
+                    end
+                end
+            end
         end
         Citizen.Wait(0)
     end
 end)
+
+-- Map Blips
+if SkinCreatorConfig.EnableClothingShops then
+    Citizen.CreateThread(function()
+        for k, v in ipairs(SkinCreatorConfig.ClothingShops) do
+            local blip = AddBlipForCoord(v)
+            SetBlipSprite(blip, 73)
+            SetBlipColour(blip, 84)
+            SetBlipAsShortRange(blip, true)
+
+            BeginTextCommandSetBlipName('STRING')
+            AddTextComponentString('Clothing Store')
+            EndTextCommandSetBlipName(blip)
+        end
+    end)
+end
+
+if SkinCreatorConfig.EnableBarberShops then
+    Citizen.CreateThread(function()
+        for k, v in ipairs(SkinCreatorConfig.BarberShops) do
+            local blip = AddBlipForCoord(v)
+            SetBlipSprite(blip, 71)
+            SetBlipColour(blip, 84)
+            SetBlipAsShortRange(blip, true)
+
+            BeginTextCommandSetBlipName('STRING')
+            AddTextComponentString('Barber Shop')
+            EndTextCommandSetBlipName(blip)
+        end
+    end)
+end
+
+if SkinCreatorConfig.EnablePlasticSurgeryUnits then
+    Citizen.CreateThread(function()
+        for k, v in ipairs(SkinCreatorConfig.PlasticSurgeryUnits) do
+            local blip = AddBlipForCoord(v)
+            SetBlipSprite(blip, 102)
+            SetBlipColour(blip, 84)
+            SetBlipAsShortRange(blip, true)
+
+            BeginTextCommandSetBlipName('STRING')
+            AddTextComponentString('Platic Surgery Unit')
+            EndTextCommandSetBlipName(blip)
+        end
+    end)
+end
+
+if SkinCreatorConfig.EnableNewIdentityProviders then
+    Citizen.CreateThread(function()
+        for k, v in ipairs(SkinCreatorConfig.NewIdentityProviders) do
+            local blip = AddBlipForCoord(v)
+            SetBlipSprite(blip, 498)
+            SetBlipColour(blip, 84)
+            SetBlipAsShortRange(blip, true)
+
+            BeginTextCommandSetBlipName('STRING')
+            AddTextComponentString('Municipal Building')
+            EndTextCommandSetBlipName(blip)
+        end
+    end)
+end
