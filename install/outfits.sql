@@ -1,5 +1,6 @@
 CREATE TABLE `outfits` (
-  `idSteam` varchar(255) NOT NULL,
+  `license` varchar(255) NOT NULL,
+  `characterid` int(11) NOT NULL DEFAULT '0',
   `dad` int(11) NOT NULL DEFAULT '0',
   `mum` int(11) NOT NULL DEFAULT '0',
   `dadmumpercent` int(11) NOT NULL DEFAULT '0',
