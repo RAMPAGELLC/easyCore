@@ -1,5 +1,5 @@
-# easyCore
-FiveM Framework
+# easyCore Framework
+FiveM Framework developed by RAMPAGE Interactive.
 
 # RAMPAGE.host
 Get VPS hosting for your servers at rampage.host!
