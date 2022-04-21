@@ -1,0 +1,1 @@
+Please insert **all** of the .sql files to your database. Once completed you can delete this folder.

@@ -1,5 +1,14 @@
+-- Tables
 easyCore.Player = {}
 easyCore.Player.Users = {}
+
+if not easyCore.Plugins["skincreator"] then
+    warn("Skin creator module is required in-order for the system to properly work")
+    return true
+end
+
+-- Plugins
+local skincreator = easyCore:GetPlugin("skincreator")
 
 function easyCore.Player.GetPlayerById(PlayerId)
     if easyCore.Player.Users[PlayerId] then
@@ -93,9 +102,9 @@ function easyCore.Player.CreatePhoneNumber()
     local PhoneNumber = nil
 
     while not UniqueFound do
-        PhoneNumber = math.random(100,999) .. math.random(1000000,9999999)
+        PhoneNumber = math.random(100, 999) .. math.random(1000000, 9999999)
         local query = '%' .. PhoneNumber .. '%'
-        local result = MySQL.Sync.prepare('SELECT COUNT(*) as count FROM players WHERE data LIKE ?', { query })
+        local result = MySQL.Sync.prepare('SELECT COUNT(*) as count FROM players WHERE data LIKE ?', {query})
 
         if result == 0 then
             UniqueFound = true
@@ -110,10 +119,19 @@ function easyCore.Player.GetCharacters(PlayerId)
     local License = easyCore.Functions.ExtractIdentifiers(PlayerId).License
     local PlayerData = MySQL.Sync.prepare('SELECT * FROM players where license = ?', {License})
 
+    if not skincreator.Settings.CharacterCreationEnabled then
+        -- if the request was not successful as defined by the first boolean
+        -- will check the second boolean, if true then it was forcefully returned false
+        -- as characters been disabled.
+
+        -- im terrible at explaining.
+        return false, true
+    end
+
     if PlayerData then
         return true, PlayerData.CharacterData.Characters or {}
     else
-        return false, {}
+        return false, false
     end
 end
 
@@ -122,7 +140,7 @@ function easyCore.Player.CreateCharacter(PlayerId, CharacterData, SetAsCurrentCh
     local PlayerData = MySQL.Sync.prepare('SELECT * FROM players where license = ?', {License})
 
     if PlayerData then
-        local Id = #PlayerData.CharacterData.Characters+1;
+        local Id = #PlayerData.CharacterData.Characters + 1;
         local Template = {
             -- Basic
             FirstName = "John",
@@ -158,9 +176,6 @@ function easyCore.Player.CreateCharacter(PlayerId, CharacterData, SetAsCurrentCh
             LoggedIn = true,
             LastLogin = os.time(),
             LastLoginFormated = os.date('%Y-%m-%d %H:%M:%S', self.Data.CharacterData.Characters[1].LastLogin),
-
-            -- Outfit
-            CharacterConfiguration = {}
         }
 
         Template.FirstName = CharacterData.FirstName or "John"
@@ -168,17 +183,11 @@ function easyCore.Player.CreateCharacter(PlayerId, CharacterData, SetAsCurrentCh
         Template.BirthDate = CharacterData.BirthDate or "12/24/1969"
         Template.Phone = CharacterData.Phone or easyCore.Player.CreatePhoneNumber()
 
-        local success, characterdata = exports["kimi_callbacks"]:Trigger("easyCore:client:InitCharacterCustomization", PlayerId)
-        
-        repeat Citizen.Wait(1 * 1000) until (success == true)
-        easyCore.Dev.Log("Character Apperance Dump")
-        easyCore.Dev.Dump(CharacterData)
-        TriggerClientEvent("easyCore:client:SetPlayerAppearance", CharacterData)
-        Template.CharacterConfiguration = CharacterData
         PlayerData.CharacterData.Characters[Id] = Template
 
         if SetAsCurrentCharacter ~= nil and SetAsCurrentCharacter then
             PlayerData.CharacterData.ActiveCharacter = Id
+            skincreator.ToggleCreator(PlayerId, Id, true)
             easyCore.Player.LoadCharacter(PlayerId)
         end
     else

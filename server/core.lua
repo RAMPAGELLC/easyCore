@@ -1,5 +1,4 @@
 easyCore = {}
-easyCore.Modules = {}
 easyCore.Plugins = {}
 
 exports('GetServerObject', function()
@@ -10,13 +9,17 @@ exports('GetPluginObject', function()
     return easyCore.Plugins
 end)
 
-exports('GetModule', function(module)
-    if easyCore.Modules[module] then
-        return easyCore.Modules[module]
+exports('GetPlugin', function(module)
+    if easyCore.Plugins[module] then
+        return easyCore.Plugins[module]
     else
-        repeat Citizen.Wait(1 * 1000) until easyCore.Modules[module] ~= nil
-        return easyCore.Modules[module]
+        repeat Citizen.Wait(1 * 1000) until easyCore.Plugins[module] ~= nil
+        return easyCore.Plugins[module]
     end
+end)
+
+exports('RegisterPlugin', function(name, pluginexports)
+    easyCore.Plugins[name] = pluginexports
 end)
 
 -- To use this export in a script instead of manifest method
