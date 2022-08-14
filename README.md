@@ -1,3 +1,9 @@
+# Notice
+easyCore development has halted, Development will resume in a few months.
+
+- RAMPAGE Interactive Management.
+8/13/2022.
+
 # easyCore Framework
 FiveM Framework developed by RAMPAGE Interactive.
 
@@ -5,10 +11,6 @@ FiveM Framework developed by RAMPAGE Interactive.
 Get VPS hosting for your servers at rampage.host!
 
 * Purchase standard vps [$17.50/mo](https://rampagecloud.com/store/vps-hosting/medium-vps)
-* Purchase team speak server [$5.00/mo](https://rampagecloud.com/store/voice-servers/teamspeak3-server)
-* Purchase mumble server [$5.00/mo](https://rampagecloud.com/store/voice-servers/mumble-server)
-* Purchase discord.js server [$4.00/mo](https://rampagecloud.com/store/discord-hosting/discordjs-hosting)
-* Purchase discord.py server [$4.00/mo](https://rampagecloud.com/store/discord-hosting/discordpy-hosting)
 
 Use code ``EASYCORE`` for 25% off your first month at checkout.
 
