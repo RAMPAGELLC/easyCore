@@ -1,5 +1,5 @@
 # Notice
-easyCore development has halted, Development will resume in a few months.
+easyCore development has halted, Development will resume in a few months. As of now easyCore is **NOT** functional, its current state is system outline and general planning.
 
 - RAMPAGE Interactive Management.
 8/13/2022.
