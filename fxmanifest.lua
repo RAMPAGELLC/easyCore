@@ -48,9 +48,9 @@ client_scripts {
     'client/*.lua',
     'shared/*.lua',
     'plugins/**/shared_*.lua',
+    'plugins/**/shared.lua',
     'plugins/**/client_*.lua',
     'plugins/**/client.lua',
-    'plugins/**/shared.lua',
 }
 
 server_scripts {
@@ -59,7 +59,7 @@ server_scripts {
     'server/*.lua',
     'shared/*.lua',
     'plugins/**/shared_*.lua',
+    'plugins/**/shared.lua',
     'plugins/**/server_*.lua',
     'plugins/**/server.lua',
-    'plugins/**/shared.lua',
 }
