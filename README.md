@@ -6,8 +6,8 @@ easyCore development has halted, Development will resume in a few months. As of 
 
 # easyCore Framework
 FiveM Framework developed by RAMPAGE Interactive.
-
 <br>
+
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/L4L8HAPLE)
 
 # RAMPAGE.host
